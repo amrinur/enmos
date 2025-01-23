@@ -98,7 +98,7 @@ void onMqttPublish(uint16_t packetId) {
   Serial.println(packetId);
 }
 
-String arrData[3];
+String arrData[5];  // Ubah dari [3] ke [5] karena data ada 5 bagian (1#V#F#T#H)
 
 String voltage, frequency, temperature, humidity, Name_ID, warning;
 float volt1, freq1, temp1, hum1;
@@ -106,8 +106,8 @@ float volt1, freq1, temp1, hum1;
 unsigned long loopStartTime = millis();
 
 void setup() {
-  Serial.begin(9600);
-  DataSerial.begin(19200);
+  Serial.begin(115200);    // Ubah baudrate ke 115200
+  DataSerial.begin(19200); // Pastikan sama dengan baudrate di Wio Terminal
 
 
   Serial.println();
@@ -131,8 +131,11 @@ void handleStatusCheck() {
     if (command == "STATUS") {
       if (WiFi.status() == WL_CONNECTED) {
         DataSerial.println("CONNECTED");
+        Serial.println("Status Check: Connected");  // Debug message
       } else {
         DataSerial.println("DISCONNECTED");
+        Serial.println("Status Check: Disconnected");  // Debug message
+        connectToWifi();  // Coba reconnect jika disconnected
       }
     }
   }
@@ -145,10 +148,18 @@ void loop() {
   String Data = "";
   while (DataSerial.available() > 0) {
     Data += char(DataSerial.read());
+    delay(2);  // Small delay untuk stabilitas pembacaan serial
   }
   Data.trim();
 
   if (Data != "" && Data != "STATUS") {  // Only process if not a status check
+    Serial.println("Received: " + Data);  // Debug message
+    
+    // Reset array sebelum parsing
+    for(int i = 0; i < 5; i++) {
+      arrData[i] = "";
+    }
+    
     //parsing data (pecah data)
     int index = 0;
     for (int i = 0; i <= Data.length(); i++) {
