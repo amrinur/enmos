@@ -9,9 +9,8 @@
 
 RTC_SAMD51 rtc;
 SHT31 sht;
-// Change from D2,D3 to the correct pins for Wio Terminal
-SoftwareSerial serial(BCM2, BCM3);      // For data transmission to ESP
-SoftwareSerial SerialMod(BCM0, BCM1);   // For Modbus
+SoftwareSerial serial(D2, D3);      // For data transmission
+SoftwareSerial SerialMod(D1, D0);   // For Modbus
 ModbusMaster node;
 
 typedef struct {
@@ -44,7 +43,7 @@ void setup() {
   
   // Initialize SD card
   if (!SD.begin(SDCARD_SS_PIN)) {
-    Serial.println("SD card initialization failed.");
+    Serial.println("SD card initialization failed!");
     return;
   }
   Serial.println("SD card initialized.");
@@ -69,17 +68,32 @@ bool checkEspConnection() {
   return espConnected;
 }
 
+bool isFileExists(const char* filename) {
+  return SD.exists(filename);
+}
+
 void saveToSD(DateTime now, float temperature, float humidity, float voltage, float frequency) {
   char filename[13];
   sprintf(filename, "/%02d%02d%02d.csv", now.year() % 100, now.month(), now.day());
   
+  // Check if file exists, if not create and add headers
+  if (!isFileExists(filename)) {
+    File dataFile = SD.open(filename, FILE_WRITE);
+    if (dataFile) {
+      dataFile.println("Timestamp,Voltage,Frequency,Temperature,Humidity");
+      dataFile.close();
+    }
+  }
+  
   File dataFile = SD.open(filename, FILE_WRITE);
   if (dataFile) {
+    char timestamp[9];
+    sprintf(timestamp, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+    
     char buffer[100];
-    sprintf(buffer, "%02d:%02d:%02d,%.2f,%.2f,%.2f,%.2f\n",
-            now.hour(), now.minute(), now.second(),
-            voltage, frequency, temperature, humidity);
-    dataFile.print(buffer);
+    sprintf(buffer, "%s,%.2f,%.2f,%.2f,%.2f",
+            timestamp, voltage, frequency, temperature, humidity);
+    dataFile.println(buffer);
     dataFile.close();
     Serial.println("Data saved to SD: " + String(filename));
   } else {
