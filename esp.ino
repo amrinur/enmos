@@ -124,17 +124,26 @@ void setup() {
 }
 
 void loop() {
-
-     // Send WiFi status every second
-  String wifiStatus = "WIFI:" + String(WiFi.status() == WL_CONNECTED ? 1 : 0);
-  Serial.println(wifiStatus);
-  delay(1000);
-
+  // Send WiFi status BEFORE handling other data
+  if (WiFi.status() == WL_CONNECTED) {
+    DataSerial.println("WIFI:1");
+  } else {
+    DataSerial.println("WIFI:0");
+  }
+  
   String Data = "";
   while (DataSerial.available() > 0) {
     Data += char(DataSerial.read());
-  
   }
+  
+  // Add debug print
+  Serial.print("WiFi Status: ");
+  Serial.println(WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+
+  // Send WiFi status every second
+  String wifiStatus = "WIFI:" + String(WiFi.status() == WL_CONNECTED ? 1 : 0);
+  Serial.println(wifiStatus);
+  delay(1000);
 
   //buang spasi datanya
   Data.trim();
