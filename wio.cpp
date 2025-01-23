@@ -29,7 +29,7 @@ const long ESP_CHECK_INTERVAL = 5000;  // Check ESP connection every 5 seconds
 
 void setup() {
   Serial.begin(115200);
-  serial.begin(19200);
+  serial.begin(19200);  // Pastikan sama dengan baudrate DataSerial di ESP
   SerialMod.begin(9600);
   
   Wire.begin();
@@ -53,6 +53,7 @@ bool checkEspConnection() {
   if (millis() - lastEspCheck >= ESP_CHECK_INTERVAL) {
     lastEspCheck = millis();
     
+    Serial.println("Checking ESP connection...");  // Debug message
     serial.println(ESP_CHECK_CMD);
     unsigned long timeout = millis() + 1000;  // 1 second timeout
     
@@ -61,9 +62,11 @@ bool checkEspConnection() {
         String response = serial.readStringUntil('\n');
         response.trim();
         espConnected = (response == ESP_CONNECTED);
+        Serial.println("ESP Response: " + response);  // Debug message
         return espConnected;
       }
     }
+    Serial.println("ESP Check timeout");  // Debug message
     espConnected = false;
   }
   return espConnected;
@@ -94,18 +97,27 @@ void loop() {
   if (!espConnected) {
     // ESP is not connected - save to SD card
     char filename[25];
-    snprintf(filename, sizeof(filename), "/bisa.csv", now.year(), now.month());
+    // Perbaiki format string - hapus format specifiers yang tidak digunakan
+    snprintf(filename, sizeof(filename), "/bisa.csv");  // Nama file statis
+    // atau gunakan format dengan tanggal jika ingin file per hari:
+    // snprintf(filename, sizeof(filename), "/%04d%02d%02d.csv", now.year(), now.month(), now.day());
     
     File file = SD.open(filename, FILE_WRITE);
     if (file) {
-      file.printf("%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
-        now.year(), now.month(), now.day(),
-        now.hour(), now.minute(), now.second(),
-        temperature, humidity, r.V, r.F);
+      // Tulis data dengan format yang benar
+      char buffer[100];
+      snprintf(buffer, sizeof(buffer), 
+               "%04d-%02d-%02d %02d:%02d:%02d,%.2f,%.2f,%.2f,%.2f\n",
+               now.year(), now.month(), now.day(),
+               now.hour(), now.minute(), now.second(),
+               temperature, humidity, r.V, r.F);
+      
+      file.print(buffer);  // Gunakan print instead of printf
       
       file.flush();
       file.close();
-      Serial.println("Data saved to SD card (ESP disconnected)");
+      Serial.print("Data saved to SD card: ");
+      Serial.println(buffer);  // Debug: tampilkan data yang ditulis
     } else {
       Serial.println("Error opening log file");
     }
