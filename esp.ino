@@ -1,8 +1,7 @@
-#include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
-#include <AsyncMqttClient.h>
 #include <SoftwareSerial.h>
+#include <ESP8266WiFi.h>
 #include <Ticker.h>
+#include <AsyncMqttClient.h>
 
 //Konfigurasi Wifi
 //#define WIFI_SSID "DEQA"
@@ -25,8 +24,7 @@ const int mqtt_port = 1883;
 const char* mqtt_user = "";  // Optional
 const char* mqtt_password = "";  // Optional
 
-// Ubah pin definisi - RX ESP terhubung ke TX Wio, TX ESP terhubung ke RX Wio
-SoftwareSerial DataSerial(13, 12);  // RX = GPIO13, TX = GPIO12
+SoftwareSerial DataSerial(12, 13);
 
 // MQTT Broker address
 //#define MQTT_HOST IPAddress(broker.hivemq.com)
@@ -100,7 +98,7 @@ void onMqttPublish(uint16_t packetId) {
   Serial.println(packetId);
 }
 
-String arrData[5];  // Ubah dari [3] ke [5] karena data ada 5 bagian (1#V#F#T#H)
+String arrData[3];
 
 String voltage, frequency, temperature, humidity, Name_ID, warning;
 float volt1, freq1, temp1, hum1;
@@ -108,8 +106,8 @@ float volt1, freq1, temp1, hum1;
 unsigned long loopStartTime = millis();
 
 void setup() {
-  Serial.begin(115200);    // Ubah baudrate ke 115200
-  DataSerial.begin(19200); // Pastikan sama dengan baudrate di Wio Terminal
+  Serial.begin(9600);
+  DataSerial.begin(19200);
 
 
   Serial.println();
@@ -125,43 +123,32 @@ void setup() {
   connectToWifi();
 }
 
-void handleStatusCheck() {
+void loop() {
+  // Add WiFi status check handling at the start of loop
   if (DataSerial.available()) {
     String command = DataSerial.readStringUntil('\n');
     command.trim();
-    
     if (command == "STATUS") {
       if (WiFi.status() == WL_CONNECTED) {
         DataSerial.println("CONNECTED");
-        Serial.println("Status Check: Connected");  // Debug message
       } else {
         DataSerial.println("DISCONNECTED");
-        Serial.println("Status Check: Disconnected");  // Debug message
-        connectToWifi();  // Coba reconnect jika disconnected
       }
     }
   }
-}
-
-void loop() {
-  // Add status check at the beginning of loop
-  handleStatusCheck();
 
   String Data = "";
   while (DataSerial.available() > 0) {
     Data += char(DataSerial.read());
-    delay(2);  // Small delay untuk stabilitas pembacaan serial
+  
   }
+
+  //buang spasi datanya
   Data.trim();
 
-  if (Data != "" && Data != "STATUS") {  // Only process if not a status check
-    Serial.println("Received: " + Data);  // Debug message
-    
-    // Reset array sebelum parsing
-    for(int i = 0; i < 5; i++) {
-      arrData[i] = "";
-    }
-    
+
+
+  if (Data != "") {
     //parsing data (pecah data)
     int index = 0;
     for (int i = 0; i <= Data.length(); i++) {
