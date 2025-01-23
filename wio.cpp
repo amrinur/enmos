@@ -57,6 +57,8 @@ void loop() {
     if (response.startsWith("WIFI:")) {
       isWiFiConnected = (response.substring(5).toInt() == 1);
       lastEspResponse = millis();
+      Serial.print("WiFi Status from ESP: ");  // Debug print
+      Serial.println(isWiFiConnected);         // Debug print
     }
   }
 
@@ -65,9 +67,6 @@ void loop() {
     isWiFiConnected = false;
   }
 
-  // Update WiFi connection status
-  isWiFiConnected = (WiFi.status() == WL_CONNECTED);
-  
   // Read sensors
   sht.read();
   float temperature = sht.getTemperature();
