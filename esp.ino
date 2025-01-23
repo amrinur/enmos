@@ -124,23 +124,21 @@ void setup() {
 }
 
 void loop() {
-  // Add WiFi status check handling at the start of loop
-  if (DataSerial.available()) {
-    String command = DataSerial.readStringUntil('\n');
-    command.trim();
-    if (command == "STATUS") {
-      if (WiFi.status() == WL_CONNECTED) {
-        DataSerial.println("CONNECTED");
-      } else {
-        DataSerial.println("DISCONNECTED");
-      }
-    }
-  }
 
   String Data = "";
   while (DataSerial.available() > 0) {
     Data += char(DataSerial.read());
-  
+  }
+
+  Data.trim();
+
+  // Tambahkan pengecekan STATUS
+  if (Data == "STATUS") {
+    if (WiFi.isConnected()) {
+      DataSerial.println("CONNECTED");
+    } else {
+      DataSerial.println("DISCONNECTED");
+    }
   }
 
   //buang spasi datanya
