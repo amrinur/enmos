@@ -6,6 +6,7 @@
 #include "RTC_SAMD51.h"
 #include "DateTime.h"
 #include "Wire.h"
+#include <WiFi.h>  // Add WiFi library
 
 RTC_SAMD51 rtc;
 SHT31 sht;
@@ -20,16 +21,13 @@ typedef struct {
 
 unsigned long previousMillis2 = 0;
 const long INTERVAL = 11100;  // Interval for data transmission
-
-bool espConnected = false;
-const String ESP_CHECK_CMD = "STATUS";
-const String ESP_CONNECTED = "CONNECTED";
-unsigned long lastEspCheck = 0;
-const long ESP_CHECK_INTERVAL = 5000;  // Check ESP connection every 5 seconds
+bool isWiFiConnected = false;  // Add global variable for WiFi status
+unsigned long lastEspResponse = 0;
+const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 void setup() {
   Serial.begin(115200);
-  serial.begin(19200);  // Pastikan sama dengan baudrate DataSerial di ESP
+  serial.begin(19200);
   SerialMod.begin(9600);
   
   Wire.begin();
@@ -47,67 +45,34 @@ void setup() {
     return;
   }
   Serial.println("SD card initialized.");
-}
-
-bool checkEspConnection() {
-  if (millis() - lastEspCheck >= ESP_CHECK_INTERVAL) {
-    lastEspCheck = millis();
-    serial.println("STATUS");
-    
-    unsigned long timeout = millis() + 1000;
-    while (millis() < timeout) {
-      if (serial.available()) {
-        String response = serial.readStringUntil('\n');
-        response.trim();
-        espConnected = (response == "CONNECTED");
-        return espConnected;
-      }
-    }
-    espConnected = false;
-  }
-  return espConnected;
-}
-
-bool isFileExists(const char* filename) {
-  return SD.exists(filename);
-}
-
-void saveToSD(DateTime now, float temperature, float humidity, float voltage, float frequency) {
-  char filename[13];
-  sprintf(filename, "/%02d%02d%02d.csv", now.year() % 100, now.month(), now.day());
   
-  // Check if file exists, if not create and add headers
-  if (!isFileExists(filename)) {
-    File dataFile = SD.open(filename, FILE_WRITE);
-    if (dataFile) {
-      dataFile.println("Timestamp,Voltage,Frequency,Temperature,Humidity");
-      dataFile.close();
-    }
-  }
-  
-  File dataFile = SD.open(filename, FILE_WRITE);
-  if (dataFile) {
-    char timestamp[9];
-    sprintf(timestamp, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
-    
-    char buffer[100];
-    sprintf(buffer, "%s,%.2f,%.2f,%.2f,%.2f",
-            timestamp, voltage, frequency, temperature, humidity);
-    dataFile.println(buffer);
-    dataFile.close();
-    Serial.println("Data saved to SD: " + String(filename));
-  } else {
-    Serial.println("Error opening data file");
-  }
+  // Add WiFi status check
+  isWiFiConnected = (WiFi.status() == WL_CONNECTED);
 }
 
 void loop() {
-  bool isEspConnected = checkEspConnection();
+  // Check for ESP WiFi status
+  if (serial.available()) {
+    String response = serial.readStringUntil('\n');
+    if (response.startsWith("WIFI:")) {
+      isWiFiConnected = (response.substring(5).toInt() == 1);
+      lastEspResponse = millis();
+    }
+  }
+
+  // If no response from ESP for 5 seconds, consider it disconnected
+  if (millis() - lastEspResponse > ESP_TIMEOUT) {
+    isWiFiConnected = false;
+  }
+
+  // Update WiFi connection status
+  isWiFiConnected = (WiFi.status() == WL_CONNECTED);
   
-  // Read sensor data
+  // Read sensors
   sht.read();
   float temperature = sht.getTemperature();
   float humidity = sht.getHumidity();
+  
   DateTime now = rtc.now();
   
   // Read Modbus data
@@ -116,23 +81,43 @@ void loop() {
   if (result == node.ku8MBSuccess) {
     r.V = (float)node.getResponseBuffer(0x00) / 100;
     r.F = (float)node.getResponseBuffer(0x09) / 100;
+  } else {
+    r.V = 0;
+    r.F = 0;
   }
 
-  if (!isEspConnected) {
-    // Save to SD card when ESP/WiFi is not connected
-    saveToSD(now, temperature, humidity, r.V, r.F);
+  // Log to SD card
+  char filename[25];
+  snprintf(filename, sizeof(filename), "/bisa.csv", now.year(), now.month());
+  
+  File file = SD.open(filename, FILE_WRITE);
+  if (file) {
+    file.printf("%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f;%d\n",
+      now.year(), now.month(), now.day(),
+      now.hour(), now.minute(), now.second(),
+      temperature, humidity, r.V, r.F,
+      isWiFiConnected ? 1 : 0);  // Add WiFi status to CSV
+    
+    file.flush();
+    file.close();
   } else {
-    // Send data via serial when ESP is connected
-    unsigned long currentMillis = millis();
-    if (currentMillis - previousMillis2 >= INTERVAL) {
-      previousMillis2 = currentMillis;
-      String datakirim = String("1#") + String(r.V, 1) + "#" +
-                        String(r.F, 1) + "#" +
-                        String(temperature, 1) + "#" +
-                        String(humidity, 1);
-      serial.println(datakirim);
-    }
+    Serial.println("Error opening log file");
+  }
+
+  // Send data via serial at specified intervals
+  unsigned long currentMillis1 = millis();
+  if (currentMillis1 - previousMillis2 >= INTERVAL) {
+    previousMillis2 = currentMillis1;
+    
+    String datakirim = String("1#") +
+                       String(r.V, 1) + "#" +
+                       String(r.F, 1) + "#" +
+                       String(temperature, 1) + "#" +
+                       String(humidity, 1);
+    
+    Serial.println(datakirim);
+    serial.println(datakirim);
   }
   
-  delay(1000);
+  delay(1000);  // Small delay to prevent overwhelming the system
 }
