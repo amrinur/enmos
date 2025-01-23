@@ -3,10 +3,10 @@
 #include <SoftwareSerial.h>
 #include <ModbusMaster.h>
 #include <SHT31.h>
-#include <RTClib.h>
+#include <RTClib.h>  // Ganti dengan RTClib
 #include <Wire.h>
 
-RTC_SAMD51 rtc;
+RTC_DS3231 rtc;  // Ganti dengan RTC_DS3231 yang lebih umum digunakan
 SHT31 sht;
 SoftwareSerial serial(D2, D3);      // For data transmission
 SoftwareSerial SerialMod(D1, D0);   // For Modbus
