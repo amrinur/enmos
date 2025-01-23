@@ -24,7 +24,8 @@ const int mqtt_port = 1883;
 const char* mqtt_user = "";  // Optional
 const char* mqtt_password = "";  // Optional
 
-SoftwareSerial DataSerial(12, 13);
+// Ubah pin definisi - RX ESP terhubung ke TX Wio, TX ESP terhubung ke RX Wio
+SoftwareSerial DataSerial(13, 12);  // RX = GPIO13, TX = GPIO12
 
 // MQTT Broker address
 //#define MQTT_HOST IPAddress(broker.hivemq.com)
