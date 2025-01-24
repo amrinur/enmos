@@ -93,14 +93,14 @@ void loop() {
 
   // Log to SD card
   char filename[25];
-  snprintf(filename, sizeof(filename), "/bisa.csv", now.year(), now.month());
+  snprintf(filename, sizeof(filename), "/bisa.csv");
   
   File file = SD.open(filename, FILE_WRITE);
   if (file) {
-    file.printf("%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f;%d\n",
+    file.printf("%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
       now.year(), now.month(), now.day(),
       now.hour(), now.minute(), now.second(),
-      temperature, humidity, r.V, r.F);  // Add WiFi status to CSV
+      temperature, humidity, r.V, r.F);
     
     file.flush();
     file.close();
@@ -108,52 +108,54 @@ void loop() {
     Serial.println("Error opening log file");
   }
 
-  // Read last line from CSV and send to ESP at intervals
+  // Read first line from CSV and send to ESP at intervals
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL) {
     previousMillisCSV = currentMillis;
     
     File readFile = SD.open(filename);
-    if (readFile) {
-      // Seek to end of file
-      readFile.seek(readFile.size());
-      long position = readFile.position();
+    if (readFile && readFile.available()) {
+      // Baca baris pertama untuk dikirim
+      String firstLine = readFile.readStringUntil('\n');
       
-      // Find start of last line
-      long lastPos = position-2;
-      while (lastPos > 0) {
-        readFile.seek(lastPos);
-        char c = readFile.read();
-        if (c == '\n') {
-          break;
-        }
-        lastPos--;
-      }
-      
-      // Read last line
-      String lastLine = readFile.readStringUntil('\n');
-      readFile.close();
-      
-      // Parse CSV line
-      int pos1 = lastLine.indexOf(';');
-      int pos2 = lastLine.indexOf(';', pos1 + 1);
-      int pos3 = lastLine.indexOf(';', pos2 + 1);
-      int pos4 = lastLine.indexOf(';', pos3 + 1);
+      // Parse dan kirim baris pertama
+      int pos1 = firstLine.indexOf(';');
+      int pos2 = firstLine.indexOf(';', pos1 + 1);
+      int pos3 = firstLine.indexOf(';', pos2 + 1);
+      int pos4 = firstLine.indexOf(';', pos3 + 1);
       
       if (pos1 != -1 && pos2 != -1 && pos3 != -1 && pos4 != -1) {
-        String temp = lastLine.substring(pos2 + 1, pos3);
-        String hum = lastLine.substring(pos3 + 1, pos4);
-        String volt = lastLine.substring(pos4 + 1);
+        String temp = firstLine.substring(pos2 + 1, pos3);
+        String hum = firstLine.substring(pos3 + 1, pos4);
+        String volt = firstLine.substring(pos4 + 1);
         
-        // Format: 1#voltage#frequency#temperature#humidity
         String datakirim = String("1#") + 
                           volt + "#" +
                           String(r.F, 1) + "#" +
                           temp + "#" +
                           hum;
         
+        // Kirim data ke ESP
         serial.println(datakirim);
-        Serial.println("Sent to ESP: " + datakirim); // Debug print
+        Serial.println("Sent to ESP: " + datakirim);
+        
+        // Simpan data yang belum terkirim
+        String remainingData = "";
+        while (readFile.available()) {
+          remainingData += readFile.readStringUntil('\n');
+          if (readFile.available()) {
+            remainingData += '\n';
+          }
+        }
+        readFile.close();
+        
+        // Tulis ulang file dengan sisa data
+        SD.remove(filename);
+        File writeFile = SD.open(filename, FILE_WRITE);
+        if (writeFile) {
+          writeFile.print(remainingData);
+          writeFile.close();
+        }
       }
     }
   }
