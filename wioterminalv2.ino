@@ -28,9 +28,6 @@ const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 unsigned long previousMillisCSV = 0;
 const long CSV_READ_INTERVAL = 1000;  // Interval for reading CSV and sending to ESP
 
-// Tambahkan variabel global untuk tracking nomor antrian
-unsigned long queueNumber = 1;
-
 void setup() {
   Serial.begin(115200);
   serial.begin(19200);
@@ -96,29 +93,25 @@ void loop() {
 
   // Log to SD card
   char filename[25];
-  snprintf(filename, sizeof(filename), "/bisa.csv");
+  snprintf(filename, sizeof(filename), "/joshaphatt.csv");
   
   File file = SD.open(filename, FILE_WRITE);
   if (file) {
-    // Format CSV dengan padding dan nomor antrian
+    // Format CSV tanpa nomor antrian, lebih sederhana
     char buffer[128];
     snprintf(buffer, sizeof(buffer), 
-             "%04lu;%04d-%02d-%02d %02d:%02d:%02d;%8.2f;%8.2f;%8.2f;%8.2f\n",
-             queueNumber,
+             "%04d-%02d-%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
              now.year(), now.month(), now.day(),
              now.hour(), now.minute(), now.second(),
              temperature, humidity, r.V, r.F);
     
     file.print(buffer);
-    queueNumber++;
-    
-    file.flush();
     file.close();
   } else {
     Serial.println("Error opening log file");
   }
 
-  // Read first line from CSV and send to ESP at intervals (FIFO)
+  // Read first line from CSV and send to ESP at intervals
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL) {
     previousMillisCSV = currentMillis;
@@ -127,35 +120,30 @@ void loop() {
     String remainingData = "";
     
     if (readFile && readFile.available()) {
-      // Baca dan proses baris pertama
-      char firstLine[128];
-      int i = 0;
-      while (readFile.available() && i < sizeof(firstLine) - 1) {
-        char c = readFile.read();
+      // Baca baris pertama
+      String firstLine = "";
+      char c;
+      while (readFile.available()) {
+        c = readFile.read();
         if (c == '\n') break;
-        firstLine[i++] = c;
+        firstLine += c;
       }
-      firstLine[i] = '\0';
       
-      // Parse CSV dengan format baru
-      String line = String(firstLine);
-      int pos0 = line.indexOf(';');
-      int pos1 = line.indexOf(';', pos0 + 1);
-      int pos2 = line.indexOf(';', pos1 + 1);
-      int pos3 = line.indexOf(';', pos2 + 1);
-      int pos4 = line.indexOf(';', pos3 + 1);
+      // Parse CSV dengan format baru (tanpa nomor antrian)
+      int pos1 = firstLine.indexOf(';');
+      int pos2 = firstLine.indexOf(';', pos1 + 1);
+      int pos3 = firstLine.indexOf(';', pos2 + 1);
+      int pos4 = firstLine.indexOf(';', pos3 + 1);
       
-      if (pos0 != -1 && pos1 != -1 && pos2 != -1 && pos3 != -1 && pos4 != -1) {
-        // Parsing tanpa menggunakan trim()
-        String qNum = line.substring(0, pos0);
-        String temp = line.substring(pos2 + 1, pos3);
-        String hum = line.substring(pos3 + 1, pos4);
-        String volt = line.substring(pos4 + 1);
+      if (pos1 != -1 && pos2 != -1 && pos3 != -1) {
+        String temp = firstLine.substring(pos1 + 1, pos2);
+        String hum = firstLine.substring(pos2 + 1, pos3);
+        String volt = firstLine.substring(pos3 + 1);
         
-        // Hapus spasi manual jika diperlukan
-        temp.replace(" ", "");
-        hum.replace(" ", "");
-        volt.replace(" ", "");
+        // Hapus spasi
+        temp.trim();
+        hum.trim();
+        volt.trim();
         
         String datakirim = String("1#") + 
                           volt + "#" +
@@ -164,22 +152,16 @@ void loop() {
                           hum;
         
         serial.println(datakirim);
-        Serial.print("Queue #"); Serial.print(qNum); 
-        Serial.println(" sent to ESP: " + datakirim);
+        Serial.println("Sent to ESP: " + datakirim);
         
-        // FIFO: Simpan sisa data
-        char buffer[128];
+        // Salin sisa data
         while (readFile.available()) {
-          int bytesRead = readFile.readBytesUntil('\n', buffer, sizeof(buffer)-1);
-          if (bytesRead > 0) {
-            buffer[bytesRead] = '\0';
-            remainingData += String(buffer) + "\n";
-          }
+          remainingData += (char)readFile.read();
         }
         
         readFile.close();
         
-        // Tulis ulang file dengan sisa data
+        // Tulis ulang file
         SD.remove(filename);
         File writeFile = SD.open(filename, FILE_WRITE);
         if (writeFile) {
