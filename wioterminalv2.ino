@@ -20,13 +20,13 @@ typedef struct {
 } READING;
 
 unsigned long previousMillis2 = 0;
-const long INTERVAL = 20000;  // Interval for data transmission
+const long INTERVAL = 11100;  // Interval for data transmission
 bool isWiFiConnected = false;  // Add global variable for WiFi status
 unsigned long lastEspResponse = 0;
 const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 unsigned long previousMillisCSV = 0;
-const long CSV_READ_INTERVAL = 1000;  // Interval for reading CSV and sending to ESP
+const long CSV_READ_INTERVAL = 11100;  // Interval for reading CSV and sending to ESP
 
 void setup() {
   Serial.begin(115200);
@@ -34,10 +34,10 @@ void setup() {
   SerialMod.begin(9600);
   
   Wire.begin();
-  sht.begin();    // SHT31 I2C Address
+  sht.begin(0x44);    // SHT31 I2C Address
   rtc.begin();
   
-  DateTime now = DateTime(F(__DATE__), F(__TIME__));
+  DateTime now = DateTime(F(_DATE), F(TIME_));
   rtc.adjust(now);
   
   node.begin(17, SerialMod);
@@ -93,22 +93,30 @@ void loop() {
 
   // Log to SD card
   char filename[25];
-  snprintf(filename, sizeof(filename), "/joshaphatt.csv");
+  snprintf(filename, sizeof(filename), "/bisa.csv");
+  
+  // Cek apakah file sudah ada
+  if (!SD.exists(filename)) {
+    // Jika file belum ada, buat header
+    File headerFile = SD.open(filename, FILE_WRITE);
+    if (headerFile) {
+      headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
+      headerFile.close();
+    }
+  }
   
   File file = SD.open(filename, FILE_WRITE);
   if (file) {
-    // Format CSV tanpa nomor antrian, lebih sederhana
+    // Format data dengan lebar kolom yang konsisten
     char buffer[128];
     snprintf(buffer, sizeof(buffer), 
-             "%04d-%02d-%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
+             "%04d-%02d-%02d %02d:%02d:%02d;%7.2f;%7.2f;%7.2f;%7.2f\n",
              now.year(), now.month(), now.day(),
              now.hour(), now.minute(), now.second(),
              temperature, humidity, r.V, r.F);
     
     file.print(buffer);
     file.close();
-  } else {
-    Serial.println("Error opening log file");
   }
 
   // Read first line from CSV and send to ESP at intervals
@@ -117,51 +125,51 @@ void loop() {
     previousMillisCSV = currentMillis;
     
     File readFile = SD.open(filename);
-    String remainingData = "";
-    
     if (readFile && readFile.available()) {
-      // Baca baris pertama
-      String firstLine = "";
-      char c;
-      while (readFile.available()) {
-        c = readFile.read();
-        if (c == '\n') break;
-        firstLine += c;
-      }
+      // Skip header jika ada
+      String header = readFile.readStringUntil('\n');
       
-      // Parse CSV dengan format baru (tanpa nomor antrian)
-      int pos1 = firstLine.indexOf(';');
-      int pos2 = firstLine.indexOf(';', pos1 + 1);
-      int pos3 = firstLine.indexOf(';', pos2 + 1);
-      int pos4 = firstLine.indexOf(';', pos3 + 1);
-      
-      if (pos1 != -1 && pos2 != -1 && pos3 != -1) {
-        String temp = firstLine.substring(pos1 + 1, pos2);
-        String hum = firstLine.substring(pos2 + 1, pos3);
-        String volt = firstLine.substring(pos3 + 1);
+      if (readFile.available()) {
+        // Baca baris data pertama
+        String firstLine = readFile.readStringUntil('\n');
         
-        // Hapus spasi
-        temp.trim();
-        hum.trim();
-        volt.trim();
+        // Parse data dengan format yang sudah ditentukan
+        int pos1 = firstLine.indexOf(';');
+        int pos2 = firstLine.indexOf(';', pos1 + 1);
+        int pos3 = firstLine.indexOf(';', pos2 + 1);
+        int pos4 = firstLine.indexOf(';', pos3 + 1);
         
-        String datakirim = String("1#") + 
-                          volt + "#" +
-                          String(r.F, 1) + "#" +
-                          temp + "#" +
-                          hum;
+        if (pos1 != -1 && pos2 != -1 && pos3 != -1) {
+          // Ekstrak data dan hapus spasi
+          String temp = firstLine.substring(pos1 + 1, pos2);
+          String hum = firstLine.substring(pos2 + 1, pos3);
+          String volt = firstLine.substring(pos3 + 1, pos4);
+          
+          temp.trim();
+          hum.trim();
+          volt.trim();
+          
+          String datakirim = String("1#") + 
+                            volt + "#" +
+                            String(r.F, 1) + "#" +
+                            temp + "#" +
+                            hum;
         
+        // Kirim data ke ESP
         serial.println(datakirim);
         Serial.println("Sent to ESP: " + datakirim);
         
-        // Salin sisa data
+        // Simpan data yang belum terkirim
+        String remainingData = "";
         while (readFile.available()) {
-          remainingData += (char)readFile.read();
+          remainingData += readFile.readStringUntil('\n');
+          if (readFile.available()) {
+            remainingData += '\n';
+          }
         }
-        
         readFile.close();
         
-        // Tulis ulang file
+        // Tulis ulang file dengan sisa data
         SD.remove(filename);
         File writeFile = SD.open(filename, FILE_WRITE);
         if (writeFile) {
