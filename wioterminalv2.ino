@@ -146,10 +146,16 @@ void loop() {
       int pos4 = line.indexOf(';', pos3 + 1);
       
       if (pos0 != -1 && pos1 != -1 && pos2 != -1 && pos3 != -1 && pos4 != -1) {
+        // Parsing tanpa menggunakan trim()
         String qNum = line.substring(0, pos0);
-        String temp = line.substring(pos2 + 1, pos3).trim();
-        String hum = line.substring(pos3 + 1, pos4).trim();
-        String volt = line.substring(pos4 + 1).trim();
+        String temp = line.substring(pos2 + 1, pos3);
+        String hum = line.substring(pos3 + 1, pos4);
+        String volt = line.substring(pos4 + 1);
+        
+        // Hapus spasi manual jika diperlukan
+        temp.replace(" ", "");
+        hum.replace(" ", "");
+        volt.replace(" ", "");
         
         String datakirim = String("1#") + 
                           volt + "#" +
