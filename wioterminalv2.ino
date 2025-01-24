@@ -20,13 +20,13 @@ typedef struct {
 } READING;
 
 unsigned long previousMillis2 = 0;
-const long INTERVAL = 11100;  // Interval for data transmission
+const long INTERVAL = 20000;  // Interval for data transmission
 bool isWiFiConnected = false;  // Add global variable for WiFi status
 unsigned long lastEspResponse = 0;
 const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 unsigned long previousMillisCSV = 0;
-const long CSV_READ_INTERVAL = 11100;  // Interval for reading CSV and sending to ESP
+const long CSV_READ_INTERVAL = 5000;  // Interval for reading CSV and sending to ESP
 
 void setup() {
   Serial.begin(115200);
