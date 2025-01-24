@@ -20,13 +20,13 @@ typedef struct {
 } READING;
 
 unsigned long previousMillis2 = 0;
-const long INTERVAL = 20000;  // Interval for data transmission
+const long INTERVAL = 11100;  // Interval for data transmission
 bool isWiFiConnected = false;  // Add global variable for WiFi status
 unsigned long lastEspResponse = 0;
 const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 unsigned long previousMillisCSV = 0;
-const long CSV_READ_INTERVAL = 5000;  // Interval for reading CSV and sending to ESP
+const long CSV_READ_INTERVAL = 20000;  // 20 detik (3x per menit)
 
 void setup() {
   Serial.begin(115200);
@@ -107,10 +107,10 @@ void loop() {
   
   File file = SD.open(filename, FILE_WRITE);
   if (file) {
-    // Format data dengan lebar kolom yang konsisten
+    // Format baru dengan pemisah yang jelas dan tanpa spasi ekstra
     char buffer[128];
     snprintf(buffer, sizeof(buffer), 
-             "%04d-%02d-%02d %02d:%02d:%02d;%7.2f;%7.2f;%7.2f;%7.2f\n",
+             "%04d-%02d-%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
              now.year(), now.month(), now.day(),
              now.hour(), now.minute(), now.second(),
              temperature, humidity, r.V, r.F);
@@ -133,31 +133,39 @@ void loop() {
         // Baca baris data pertama
         String firstLine = readFile.readStringUntil('\n');
         
-        // Parse data dengan format yang sudah ditentukan
-        int pos1 = firstLine.indexOf(';');
-        int pos2 = firstLine.indexOf(';', pos1 + 1);
-        int pos3 = firstLine.indexOf(';', pos2 + 1);
-        int pos4 = firstLine.indexOf(';', pos3 + 1);
-        
-        if (pos1 != -1 && pos2 != -1 && pos3 != -1) {
-          // Ekstrak data dan hapus spasi
-          String temp = firstLine.substring(pos1 + 1, pos2);
-          String hum = firstLine.substring(pos2 + 1, pos3);
-          String volt = firstLine.substring(pos3 + 1, pos4);
+        // Validasi format data
+        if (firstLine.length() > 0) {
+          int semicolons = 0;
+          for (unsigned int i = 0; i < firstLine.length(); i++) {
+            if (firstLine[i] == ';') semicolons++;
+          }
           
-          temp.trim();
-          hum.trim();
-          volt.trim();
-          
-          String datakirim = String("1#") + 
-                            volt + "#" +
-                            String(r.F, 1) + "#" +
-                            temp + "#" +
-                            hum;
-        
-        // Kirim data ke ESP
-        serial.println(datakirim);
-        Serial.println("Sent to ESP: " + datakirim);
+          // Pastikan ada 4 pemisah (;) untuk 5 kolom
+          if (semicolons == 4) {
+            int pos1 = firstLine.indexOf(';');
+            int pos2 = firstLine.indexOf(';', pos1 + 1);
+            int pos3 = firstLine.indexOf(';', pos2 + 1);
+            int pos4 = firstLine.indexOf(';', pos3 + 1);
+            
+            String temp = firstLine.substring(pos1 + 1, pos2);
+            String hum = firstLine.substring(pos2 + 1, pos3);
+            String volt = firstLine.substring(pos3 + 1, pos4);
+            String freq = firstLine.substring(pos4 + 1);
+            
+            // Hapus spasi dan karakter newline
+            temp.trim();
+            hum.trim();
+            volt.trim();
+            freq.trim();
+            
+            String datakirim = String("1#") + 
+                              volt + "#" +
+                              freq + "#" +  // Gunakan freq dari CSV
+                              temp + "#" +
+                              hum;
+            
+            serial.println(datakirim);
+            Serial.println("Sent to ESP: " + datakirim);
         
         // Simpan data yang belum terkirim
         String remainingData = "";
