@@ -10,7 +10,8 @@
 
 RTC_SAMD51 rtc;
 SHT31 sht;
-SoftwareSerial serial(D2, D3);      // For data transmission
+// For serial communication with ESP
+SoftwareSerial serial(15, 14);      // RX=GPIO15, TX=GPIO14
 SoftwareSerial SerialMod(D1, D0);   // For Modbus
 ModbusMaster node;
 
@@ -54,11 +55,14 @@ void loop() {
   // Check for ESP WiFi status
   if (serial.available()) {
     String response = serial.readStringUntil('\n');
+    Serial.print("Received from ESP: ");  // Debug line
+    Serial.println(response);             // Debug line
+    
     if (response.startsWith("WIFI:")) {
       isWiFiConnected = (response.substring(5).toInt() == 1);
       lastEspResponse = millis();
-      Serial.print("WiFi Status from ESP: ");  // Debug print
-      Serial.println(isWiFiConnected);         // Debug print
+      Serial.print("WiFi Status parsed: ");
+      Serial.println(isWiFiConnected);
     }
   }
 
