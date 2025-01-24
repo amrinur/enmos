@@ -20,13 +20,14 @@ typedef struct {
 } READING;
 
 unsigned long previousMillis2 = 0;
-const long INTERVAL = 11100;  // Interval for data transmission
+const long INTERVAL = 20000;        // 20 detik untuk pembacaan sensor
 bool isWiFiConnected = false;  // Add global variable for WiFi status
 unsigned long lastEspResponse = 0;
 const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 unsigned long previousMillisCSV = 0;
 const long CSV_READ_INTERVAL = 20000;  // 20 detik (3x per menit)
+unsigned long previousMillisSensor = 0; // Tambah variabel untuk sensor timing
 
 void setup() {
   Serial.begin(115200);
@@ -73,54 +74,58 @@ void loop() {
     isWiFiConnected = false;
   }
 
-  // Read sensors and write to CSV
-  sht.read();
-  float temperature = sht.getTemperature();
-  float humidity = sht.getHumidity();
-  
-  DateTime now = rtc.now();
-  
-  // Read Modbus data
-  READING r;
-  uint8_t result = node.readHoldingRegisters(0002, 10);
-  if (result == node.ku8MBSuccess) {
-    r.V = (float)node.getResponseBuffer(0x00) / 100;
-    r.F = (float)node.getResponseBuffer(0x09) / 100;
-  } else {
-    r.V = 0;
-    r.F = 0;
-  }
+  // Baca sensor dan tulis ke CSV setiap 20 detik
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillisSensor >= INTERVAL) {
+    previousMillisSensor = currentMillis;
+    
+    // Read sensors
+    sht.read();
+    float temperature = sht.getTemperature();
+    float humidity = sht.getHumidity();
+    
+    DateTime now = rtc.now();
+    
+    // Read Modbus data
+    READING r;
+    uint8_t result = node.readHoldingRegisters(0002, 10);
+    if (result == node.ku8MBSuccess) {
+      r.V = (float)node.getResponseBuffer(0x00) / 100;
+      r.F = (float)node.getResponseBuffer(0x09) / 100;
+    } else {
+      r.V = 0;
+      r.F = 0;
+    }
 
-  // Log to SD card
-  char filename[25];
-  snprintf(filename, sizeof(filename), "/bisa.csv");
-  
-  // Cek apakah file sudah ada
-  if (!SD.exists(filename)) {
-    // Jika file belum ada, buat header
-    File headerFile = SD.open(filename, FILE_WRITE);
-    if (headerFile) {
-      headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
-      headerFile.close();
+    // Tulis ke CSV
+    char filename[25];
+    snprintf(filename, sizeof(filename), "/bisa.csv");
+    
+    // Check and create header if needed
+    if (!SD.exists(filename)) {
+      File headerFile = SD.open(filename, FILE_WRITE);
+      if (headerFile) {
+        headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
+        headerFile.close();
+      }
+    }
+    
+    // Write data
+    File file = SD.open(filename, FILE_WRITE);
+    if (file) {
+      char buffer[128];
+      snprintf(buffer, sizeof(buffer), 
+               "%04d-%02d-%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
+               now.year(), now.month(), now.day(),
+               now.hour(), now.minute(), now.second(),
+               temperature, humidity, r.V, r.F);
+      
+      file.print(buffer);
+      file.close();
     }
   }
-  
-  File file = SD.open(filename, FILE_WRITE);
-  if (file) {
-    // Format baru dengan pemisah yang jelas dan tanpa spasi ekstra
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer), 
-             "%04d-%02d-%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
-             now.year(), now.month(), now.day(),
-             now.hour(), now.minute(), now.second(),
-             temperature, humidity, r.V, r.F);
-    
-    file.print(buffer);
-    file.close();
-  }
 
-  // Read first line from CSV and send to ESP at intervals
-  unsigned long currentMillis = millis();
+  // Read and send CSV data every 20 seconds
   if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL) {
     previousMillisCSV = currentMillis;
     
@@ -187,6 +192,4 @@ void loop() {
       }
     }
   }
-  
-  delay(1000);  // Small delay to prevent overwhelming the system
 }
