@@ -10,8 +10,7 @@
 
 RTC_SAMD51 rtc;
 SHT31 sht;
-// For serial communication with ESP
-SoftwareSerial serial(15, 14);      // RX=GPIO15, TX=GPIO14
+SoftwareSerial serial(D2, D3);      // For data transmission
 SoftwareSerial SerialMod(D1, D0);   // For Modbus
 ModbusMaster node;
 
@@ -28,7 +27,7 @@ const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 void setup() {
   Serial.begin(115200);
-  serial.begin(19200);
+  serial.begin(9600);
   SerialMod.begin(9600);
   
   Wire.begin();
