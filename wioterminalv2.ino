@@ -20,13 +20,16 @@ typedef struct {
 } READING;
 
 unsigned long previousMillis2 = 0;
-const long INTERVAL = 11100;  // Interval for data transmission
+const long INTERVAL = 20000;  // Interval for data transmission
 bool isWiFiConnected = false;  // Add global variable for WiFi status
 unsigned long lastEspResponse = 0;
 const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
 
 unsigned long previousMillisCSV = 0;
-const long CSV_READ_INTERVAL = 11100;  // Interval for reading CSV and sending to ESP
+const long CSV_READ_INTERVAL = 1000;  // Interval for reading CSV and sending to ESP
+
+// Tambahkan variabel global untuk tracking nomor antrian
+unsigned long queueNumber = 1;
 
 void setup() {
   Serial.begin(115200);
@@ -34,10 +37,10 @@ void setup() {
   SerialMod.begin(9600);
   
   Wire.begin();
-  sht.begin(0x44);    // SHT31 I2C Address
+  sht.begin();    // SHT31 I2C Address
   rtc.begin();
   
-  DateTime now = DateTime(F(_DATE), F(TIME_));
+  DateTime now = DateTime(F(__DATE__), F(__TIME__));
   rtc.adjust(now);
   
   node.begin(17, SerialMod);
@@ -93,14 +96,21 @@ void loop() {
 
   // Log to SD card
   char filename[25];
-  snprintf(filename, sizeof(filename), "/bisa.csv");
+  snprintf(filename, sizeof(filename), "/meiyanto.csv");
   
   File file = SD.open(filename, FILE_WRITE);
   if (file) {
-    file.printf("%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
-      now.year(), now.month(), now.day(),
-      now.hour(), now.minute(), now.second(),
-      temperature, humidity, r.V, r.F);
+    // Format CSV dengan padding dan nomor antrian
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), 
+             "%04lu;%04d-%02d-%02d %02d:%02d:%02d;%8.2f;%8.2f;%8.2f;%8.2f\n",
+             queueNumber,
+             now.year(), now.month(), now.day(),
+             now.hour(), now.minute(), now.second(),
+             temperature, humidity, r.V, r.F);
+    
+    file.print(buffer);
+    queueNumber++;
     
     file.flush();
     file.close();
@@ -108,26 +118,27 @@ void loop() {
     Serial.println("Error opening log file");
   }
 
-  // Read first line from CSV and send to ESP at intervals
+  // Read first line from CSV and send to ESP at intervals (FIFO)
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL) {
     previousMillisCSV = currentMillis;
     
     File readFile = SD.open(filename);
     if (readFile && readFile.available()) {
-      // Baca baris pertama untuk dikirim
       String firstLine = readFile.readStringUntil('\n');
       
-      // Parse dan kirim baris pertama
-      int pos1 = firstLine.indexOf(';');
+      // Parse CSV dengan format baru
+      int pos0 = firstLine.indexOf(';');        // Setelah nomor antrian
+      int pos1 = firstLine.indexOf(';', pos0 + 1); // Setelah timestamp
       int pos2 = firstLine.indexOf(';', pos1 + 1);
       int pos3 = firstLine.indexOf(';', pos2 + 1);
       int pos4 = firstLine.indexOf(';', pos3 + 1);
       
-      if (pos1 != -1 && pos2 != -1 && pos3 != -1 && pos4 != -1) {
-        String temp = firstLine.substring(pos2 + 1, pos3);
-        String hum = firstLine.substring(pos3 + 1, pos4);
-        String volt = firstLine.substring(pos4 + 1);
+      if (pos0 != -1 && pos1 != -1 && pos2 != -1 && pos3 != -1 && pos4 != -1) {
+        String qNum = firstLine.substring(0, pos0);
+        String temp = firstLine.substring(pos2 + 1, pos3).trim();
+        String hum = firstLine.substring(pos3 + 1, pos4).trim();
+        String volt = firstLine.substring(pos4 + 1).trim();
         
         String datakirim = String("1#") + 
                           volt + "#" +
@@ -135,11 +146,11 @@ void loop() {
                           temp + "#" +
                           hum;
         
-        // Kirim data ke ESP
         serial.println(datakirim);
-        Serial.println("Sent to ESP: " + datakirim);
+        Serial.print("Queue #"); Serial.print(qNum); 
+        Serial.println(" sent to ESP: " + datakirim);
         
-        // Simpan data yang belum terkirim
+        // FIFO: Simpan semua data kecuali baris pertama
         String remainingData = "";
         while (readFile.available()) {
           remainingData += readFile.readStringUntil('\n');
