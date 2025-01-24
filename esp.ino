@@ -24,7 +24,8 @@ const int mqtt_port = 1883;
 const char* mqtt_user = "";  // Optional
 const char* mqtt_password = "";  // Optional
 
-SoftwareSerial DataSerial(12, 13);
+// Change from pins 12,13 to GPIO14(TX) and GPIO15(RX)
+SoftwareSerial DataSerial(15, 14);  // (RX, TX) - GPIO15=RX, GPIO14=TX
 
 // MQTT Broker address
 //#define MQTT_HOST IPAddress(broker.hivemq.com)
