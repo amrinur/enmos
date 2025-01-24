@@ -96,7 +96,7 @@ void loop() {
 
   // Log to SD card
   char filename[25];
-  snprintf(filename, sizeof(filename), "/meiyanto.csv");
+  snprintf(filename, sizeof(filename), "/bisa.csv");
   
   File file = SD.open(filename, FILE_WRITE);
   if (file) {
@@ -124,21 +124,32 @@ void loop() {
     previousMillisCSV = currentMillis;
     
     File readFile = SD.open(filename);
+    String remainingData = "";
+    
     if (readFile && readFile.available()) {
-      String firstLine = readFile.readStringUntil('\n');
+      // Baca dan proses baris pertama
+      char firstLine[128];
+      int i = 0;
+      while (readFile.available() && i < sizeof(firstLine) - 1) {
+        char c = readFile.read();
+        if (c == '\n') break;
+        firstLine[i++] = c;
+      }
+      firstLine[i] = '\0';
       
       // Parse CSV dengan format baru
-      int pos0 = firstLine.indexOf(';');        // Setelah nomor antrian
-      int pos1 = firstLine.indexOf(';', pos0 + 1); // Setelah timestamp
-      int pos2 = firstLine.indexOf(';', pos1 + 1);
-      int pos3 = firstLine.indexOf(';', pos2 + 1);
-      int pos4 = firstLine.indexOf(';', pos3 + 1);
+      String line = String(firstLine);
+      int pos0 = line.indexOf(';');
+      int pos1 = line.indexOf(';', pos0 + 1);
+      int pos2 = line.indexOf(';', pos1 + 1);
+      int pos3 = line.indexOf(';', pos2 + 1);
+      int pos4 = line.indexOf(';', pos3 + 1);
       
       if (pos0 != -1 && pos1 != -1 && pos2 != -1 && pos3 != -1 && pos4 != -1) {
-        String qNum = firstLine.substring(0, pos0);
-        String temp = firstLine.substring(pos2 + 1, pos3).trim();
-        String hum = firstLine.substring(pos3 + 1, pos4).trim();
-        String volt = firstLine.substring(pos4 + 1).trim();
+        String qNum = line.substring(0, pos0);
+        String temp = line.substring(pos2 + 1, pos3).trim();
+        String hum = line.substring(pos3 + 1, pos4).trim();
+        String volt = line.substring(pos4 + 1).trim();
         
         String datakirim = String("1#") + 
                           volt + "#" +
@@ -150,14 +161,16 @@ void loop() {
         Serial.print("Queue #"); Serial.print(qNum); 
         Serial.println(" sent to ESP: " + datakirim);
         
-        // FIFO: Simpan semua data kecuali baris pertama
-        String remainingData = "";
+        // FIFO: Simpan sisa data
+        char buffer[128];
         while (readFile.available()) {
-          remainingData += readFile.readStringUntil('\n');
-          if (readFile.available()) {
-            remainingData += '\n';
+          int bytesRead = readFile.readBytesUntil('\n', buffer, sizeof(buffer)-1);
+          if (bytesRead > 0) {
+            buffer[bytesRead] = '\0';
+            remainingData += String(buffer) + "\n";
           }
         }
+        
         readFile.close();
         
         // Tulis ulang file dengan sisa data
