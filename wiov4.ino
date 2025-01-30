@@ -19,7 +19,7 @@ const char* ssid = "nama_wifi";
 const char* password = "password_wifi";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 30000; // Cek WiFi setiap 30 detik
+const long WIFI_CHECK_INTERVAL = 14000; // Cek WiFi setiap 30 detik
 
 typedef struct {
   float V;
