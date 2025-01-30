@@ -13,6 +13,15 @@ SoftwareSerial serial(D2, D3);      // For data transmission
 SoftwareSerial SerialMod(D1, D0);   // For Modbus
 ModbusMaster node;
 
+// Pindahkan deklarasi READING ke atas
+typedef struct {
+  float V;
+  float F;
+} READING;
+
+// Pindahkan deklarasi filename ke atas
+char filename[25] = "/wiwoho.csv";
+
 // Struktur data untuk satu record
 struct DataRecord {
     char timestamp[20];
@@ -65,8 +74,6 @@ const long INTERVAL = 20000;        // 20 detik untuk pembacaan sensor
 unsigned long previousMillisCSV = 0;
 const long CSV_READ_INTERVAL = 20000;  // 20 detik untuk pengiriman data
 unsigned long previousMillisSensor = 0;
-
-char filename[25] = "/wiwoho.csv";
 
 void setup() {
   Serial.begin(115200);
