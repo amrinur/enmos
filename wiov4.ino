@@ -15,11 +15,11 @@ SoftwareSerial SerialMod(D1, D0);   // For Modbus
 ModbusMaster node;
 
 // Konfigurasi WiFi
-const char* ssid = "nama_wifi";
-const char* password = "password_wifi";
+const char* ssid = "lime";
+const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 14000; // Cek WiFi setiap 30 detik
+const long WIFI_CHECK_INTERVAL = 30000; // Cek WiFi setiap 30 detik
 
 typedef struct {
   float V;
@@ -98,16 +98,16 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // Cek status WiFi setiap 30 detik
+  // Check WiFi status every 30 seconds
   if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
       previousWiFiCheck = currentMillis;
       checkWiFiConnection();
   }
 
-  // Baca sensor dan tulis ke CSV setiap 20 detik
+  // Read sensors and write to CSV every 20 seconds
   if (currentMillis - previousMillisSensor >= INTERVAL) {
     previousMillisSensor = currentMillis;
-    Serial.println("Reading sensors..."); // Debug
+    Serial.println("Reading sensors...");
     
     // Read sensors
     sht.read();
@@ -122,14 +122,22 @@ void loop() {
     if (result == node.ku8MBSuccess) {
       r.V = (float)node.getResponseBuffer(0x00) / 100;
       r.F = (float)node.getResponseBuffer(0x09) / 100;
+      Serial.println("Modbus read success - V: " + String(r.V) + " F: " + String(r.F));
     } else {
       r.V = 0;
       r.F = 0;
+      Serial.println("Modbus read failed");
     }
 
-    // Jika WiFi mati, simpan ke CSV
+    // Format data string
+    String datakirim = String("1#") + 
+                      String(r.V, 2) + "#" +
+                      String(r.F, 2) + "#" +
+                      String(temperature, 2) + "#" +
+                      String(humidity, 2);
+
+    // If WiFi is down, save to CSV
     if (!wifiConnected) {
-        // Write to CSV
         if (!SD.exists(filename)) {
             File headerFile = SD.open(filename, FILE_WRITE);
             if (headerFile) {
@@ -142,100 +150,62 @@ void loop() {
         if (file) {
             char buffer[128];
             snprintf(buffer, sizeof(buffer), 
-                     "%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
+                     "%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f",
                       now.year(), now.month(), now.day(),
                       now.hour(), now.minute(), now.second(),
                       temperature, humidity, r.V, r.F);
-
             
-            file.print(buffer);
+            file.println(buffer);  // Use println instead of print
             file.close();
-            Serial.println("WiFi down, data saved to CSV");
+            Serial.println("Data saved to CSV: " + String(buffer));
         }
-    } else {
-        // Jika WiFi tersambung, kirim langsung ke ESP
-        String datakirim = String("1#") + 
-                         String(r.V, 2) + "#" +
-                         String(r.F, 2) + "#" +
-                         String(temperature, 2) + "#" +
-                         String(humidity, 2);
-        
-        serial.println(datakirim);
-        Serial.println("WiFi up, data sent directly");
     }
+    
+    // Always try to send to ESP regardless of WiFi status
+    serial.println(datakirim);
+    Serial.println("Data sent to ESP: " + datakirim);
   }
 
-  // Kirim data dari CSV hanya jika WiFi terhubung
+  // Process CSV data when WiFi is available
   if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL && wifiConnected) {
     previousMillisCSV = currentMillis;
-    Serial.println("Processing CSV..."); // Debug
     
     File readFile = SD.open(filename);
-    if (readFile && readFile.available()) {
-      // Skip header jika ada
+    if (readFile && readFile.size() > 0) {
       String header = readFile.readStringUntil('\n');
       
-      if (readFile.available()) {
-        // Baca baris data pertama
-        String firstLine = readFile.readStringUntil('\n');
-        
-        // Validasi format data
-        if (firstLine.length() > 0) {
-          int semicolons = 0;
-          for (unsigned int i = 0; i < firstLine.length(); i++) {
-            if (firstLine[i] == ';') semicolons++;
-          }
+      while (readFile.available()) {
+        String line = readFile.readStringUntil('\n');
+        if (line.length() > 0) {
+          int pos1 = line.indexOf(';');
+          int pos2 = line.indexOf(';', pos1 + 1);
+          int pos3 = line.indexOf(';', pos2 + 1);
+          int pos4 = line.indexOf(';', pos3 + 1);
           
-          // Pastikan ada 4 pemisah (;) untuk 5 kolom
-          if (semicolons == 4) {
-            int pos1 = firstLine.indexOf(';');
-            int pos2 = firstLine.indexOf(';', pos1 + 1);
-            int pos3 = firstLine.indexOf(';', pos2 + 1);
-            int pos4 = firstLine.indexOf(';', pos3 + 1);
+          if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+            String temp = line.substring(pos1 + 1, pos2);
+            String hum = line.substring(pos2 + 1, pos3);
+            String volt = line.substring(pos3 + 1, pos4);
+            String freq = line.substring(pos4 + 1);
             
-            String temp = firstLine.substring(pos1 + 1, pos2);
-            String hum = firstLine.substring(pos2 + 1, pos3);
-            String volt = firstLine.substring(pos3 + 1, pos4);
-            String freq = firstLine.substring(pos4 + 1);
+            temp.trim(); hum.trim(); volt.trim(); freq.trim();
             
-            // Hapus spasi dan karakter newline
-            temp.trim();
-            hum.trim();
-            volt.trim();
-            freq.trim();
-            
-            String datakirim = String("1#") + 
-                              volt + "#" +
-                              freq + "#" +  // Gunakan freq dari CSV
-                              temp + "#" +
-                              hum;
-            
-            serial.println(datakirim);
-            Serial.println("Sent to ESP: " + datakirim);
-        
-            // Simpan data yang belum terkirim
-            String remainingData = "";
-            while (readFile.available()) {
-              remainingData += readFile.readStringUntil('\n');
-              if (readFile.available()) {
-                remainingData += '\n';
-              }
-            }
-            readFile.close();
-            
-            if (remainingData.length() > 0) {
-              SD.remove(filename);
-              File writeFile = SD.open(filename, FILE_WRITE);
-              if (writeFile) {
-                writeFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency"); // Tulis ulang header
-                writeFile.print(remainingData);
-                writeFile.close();
-                Serial.println("File updated with remaining data"); // Debug
-              }
-            }
-          }  // Tutup if(firstLine.length() > 0)
-        }    // Tutup if(readFile.available())
-      }      // Tutup if(readFile && readFile.available())
-    }        // Tutup if(currentMillis - previousMillisCSV >= CSV_READ_INTERVAL)
-  }          // Tutup loop()
-}            // Tutup loop()
+            String historicalData = String("1#") + volt + "#" + freq + "#" + temp + "#" + hum;
+            serial.println(historicalData);
+            Serial.println("Sent historical data: " + historicalData);
+            delay(100); // Small delay between sending historical data
+          }
+        }
+      }
+      readFile.close();
+      
+      // Clear the file after successfully sending all data
+      SD.remove(filename);
+      File newFile = SD.open(filename, FILE_WRITE);
+      if (newFile) {
+        newFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
+        newFile.close();
+      }
+    }
+  }
+}
