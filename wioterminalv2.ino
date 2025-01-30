@@ -6,13 +6,77 @@
 #include "RTC_SAMD51.h"
 #include "DateTime.h"
 #include "Wire.h"
-#include <WiFi.h>  // Add WiFi library
 
-RTC_SAMD51 rtc;
-SHT31 sht;
-SoftwareSerial serial(D2, D3);      // For data transmission
-SoftwareSerial SerialMod(D1, D0);   // For Modbus
-ModbusMaster node;
+// Struktur data untuk satu record
+struct SensorData {
+    char timestamp[20];
+    float temp;
+    float hum;
+    float volt;
+    float freq;
+};
+
+// Queue implementation
+const int QUEUE_SIZE = 50;
+SensorData dataQueue[QUEUE_SIZE];
+int qHead = 0;  // index untuk data terdepan
+int qTail = 0;  // index untuk data terbaru
+int qCount = 0; // jumlah data dalam queue
+
+// Queue helper functions
+void initQueue() {
+    qHead = qTail = qCount = 0;
+}
+
+bool isQueueFull() {
+    return qCount >= QUEUE_SIZE;
+}
+
+bool isQueueEmpty() {
+    return qCount == 0;
+}
+
+// Tambah data ke queue
+bool enqueue(SensorData data) {
+    if (isQueueFull()) return false;
+    
+    dataQueue[qTail] = data;
+    qTail = (qTail + 1) % QUEUE_SIZE;
+    qCount++;
+    return true;
+}
+
+// Ambil dan hapus data terdepan
+bool dequeue() {
+    if (isQueueEmpty()) return false;
+    
+    qHead = (qHead + 1) % QUEUE_SIZE;
+    qCount--;
+    return true;
+}
+
+// Simpan seluruh queue ke CSV
+void saveQueueToCSV() {
+    if (SD.exists(filename)) {
+        SD.remove(filename);
+    }
+    
+    File file = SD.open(filename, FILE_WRITE);
+    if (file) {
+        file.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
+        
+        int current = qHead;
+        for (int i = 0; i < qCount; i++) {
+            SensorData data = dataQueue[current];
+            file.printf("%s;%.2f;%.2f;%.2f;%.2f\n",
+                       data.timestamp,
+                       data.temp, data.hum,
+                       data.volt, data.freq);
+            current = (current + 1) % QUEUE_SIZE;
+        }
+        file.close();
+    }
+}
 
 typedef struct {
   float V;
@@ -21,13 +85,11 @@ typedef struct {
 
 unsigned long previousMillis2 = 0;
 const long INTERVAL = 20000;        // 20 detik untuk pembacaan sensor
-bool isWiFiConnected = false;  // Add global variable for WiFi status
-unsigned long lastEspResponse = 0;
-const unsigned long ESP_TIMEOUT = 5000; // 5 seconds timeout
-
 unsigned long previousMillisCSV = 0;
-const long CSV_READ_INTERVAL = 20000;  // 20 detik (3x per menit)
-unsigned long previousMillisSensor = 0; // Tambah variabel untuk sensor timing
+const long CSV_READ_INTERVAL = 20000;  // 20 detik untuk pengiriman data
+unsigned long previousMillisSensor = 0;
+
+char filename[25] = "/wiwoho.csv";
 
 void setup() {
   Serial.begin(115200);
@@ -50,34 +112,38 @@ void setup() {
   }
   Serial.println("SD card initialized.");
   
-  // Add WiFi status check
-  isWiFiConnected = (WiFi.status() == WL_CONNECTED);
+  initQueue();
+    
+  // Load existing data from CSV if exists
+  if (SD.exists(filename)) {
+      File file = SD.open(filename);
+      if (file) {
+          String header = file.readStringUntil('\n'); // Skip header
+          
+          while (file.available() && !isQueueFull()) {
+              SensorData data;
+              String line = file.readStringUntil('\n');
+              
+              // Parse CSV line to SensorData
+              sscanf(line.c_str(), "%[^;];%f;%f;%f;%f",
+                     data.timestamp,
+                     &data.temp, &data.hum,
+                     &data.volt, &data.freq);
+                     
+              enqueue(data);
+          }
+          file.close();
+      }
+  }
 }
 
 void loop() {
-  // Check for ESP WiFi status
-  if (serial.available()) {
-    String response = serial.readStringUntil('\n');
-    Serial.print("Received from ESP: ");  // Debug line
-    Serial.println(response);             // Debug line
-    
-    if (response.startsWith("WIFI:")) {
-      isWiFiConnected = (response.substring(5).toInt() == 1);
-      lastEspResponse = millis();
-      Serial.print("WiFi Status parsed: ");
-      Serial.println(isWiFiConnected);
-    }
-  }
-
-  // If no response from ESP for 5 seconds, consider it disconnected
-  if (millis() - lastEspResponse > ESP_TIMEOUT) {
-    isWiFiConnected = false;
-  }
-
-  // Baca sensor dan tulis ke CSV setiap 20 detik
   unsigned long currentMillis = millis();
+  
+  // Baca sensor dan tambah ke queue setiap 20 detik
   if (currentMillis - previousMillisSensor >= INTERVAL) {
     previousMillisSensor = currentMillis;
+    Serial.println("Reading sensors..."); // Debug
     
     // Read sensors
     sht.read();
@@ -97,99 +163,45 @@ void loop() {
       r.F = 0;
     }
 
-    // Tulis ke CSV
-    char filename[25];
-    snprintf(filename, sizeof(filename), "/bisa.csv");
+    // Buat record baru
+    SensorData newData;
+    snprintf(newData.timestamp, sizeof(newData.timestamp),
+            "%04d-%02d-%02d %02d:%02d:%02d",
+            now.year(), now.month(), now.day(),
+            now.hour(), now.minute(), now.second());
+    newData.temp = temperature;
+    newData.hum = humidity;
+    newData.volt = r.V;
+    newData.freq = r.F;
     
-    // Check and create header if needed
-    if (!SD.exists(filename)) {
-      File headerFile = SD.open(filename, FILE_WRITE);
-      if (headerFile) {
-        headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
-        headerFile.close();
-      }
-    }
-    
-    // Write data
-    File file = SD.open(filename, FILE_WRITE);
-    if (file) {
-      char buffer[128];
-      snprintf(buffer, sizeof(buffer), 
-               "%04d-%02d-%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
-               now.year(), now.month(), now.day(),
-               now.hour(), now.minute(), now.second(),
-               temperature, humidity, r.V, r.F);
-      
-      file.print(buffer);
-      file.close();
+    // Tambah ke queue dan update CSV
+    if (enqueue(newData)) {
+        saveQueueToCSV();
+        Serial.println("New data queued and saved");
     }
   }
 
-  // Read and send CSV data every 20 seconds
-  if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL) {
+  // Kirim data dari queue setiap 20 detik
+  if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL && !isQueueEmpty()) {
     previousMillisCSV = currentMillis;
     
-    File readFile = SD.open(filename);
-    if (readFile && readFile.available()) {
-      // Skip header jika ada
-      String header = readFile.readStringUntil('\n');
-      
-      if (readFile.available()) {
-        // Baca baris data pertama
-        String firstLine = readFile.readStringUntil('\n');
-        
-        // Validasi format data
-        if (firstLine.length() > 0) {
-          int semicolons = 0;
-          for (unsigned int i = 0; i < firstLine.length(); i++) {
-            if (firstLine[i] == ';') semicolons++;
-          }
-          
-          // Pastikan ada 4 pemisah (;) untuk 5 kolom
-          if (semicolons == 4) {
-            int pos1 = firstLine.indexOf(';');
-            int pos2 = firstLine.indexOf(';', pos1 + 1);
-            int pos3 = firstLine.indexOf(';', pos2 + 1);
-            int pos4 = firstLine.indexOf(';', pos3 + 1);
-            
-            String temp = firstLine.substring(pos1 + 1, pos2);
-            String hum = firstLine.substring(pos2 + 1, pos3);
-            String volt = firstLine.substring(pos3 + 1, pos4);
-            String freq = firstLine.substring(pos4 + 1);
-            
-            // Hapus spasi dan karakter newline
-            temp.trim();
-            hum.trim();
-            volt.trim();
-            freq.trim();
-            
-            String datakirim = String("1#") + 
-                              volt + "#" +
-                              freq + "#" +  // Gunakan freq dari CSV
-                              temp + "#" +
-                              hum;
-            
-            serial.println(datakirim);
-            Serial.println("Sent to ESP: " + datakirim);
-        
-        // Simpan data yang belum terkirim
-        String remainingData = "";
-        while (readFile.available()) {
-          remainingData += readFile.readStringUntil('\n');
-          if (readFile.available()) {
-            remainingData += '\n';
-          }
-        }
-        readFile.close();
-        
-        // Tulis ulang file dengan sisa data
-        SD.remove(filename);
-        File writeFile = SD.open(filename, FILE_WRITE);
-        if (writeFile) {
-          writeFile.print(remainingData);
-          writeFile.close();
-        }
-      }
+    // Ambil data terdepan
+    SensorData frontData = dataQueue[qHead];
+    
+    // Format dan kirim data
+    String datakirim = String("1#") + 
+                      String(frontData.volt, 2) + "#" +
+                      String(frontData.freq, 2) + "#" +
+                      String(frontData.temp, 2) + "#" +
+                      String(frontData.hum, 2);
+                      
+    serial.println(datakirim);
+    Serial.println("Sent from queue: " + datakirim);
+    
+    // Hapus data yang sudah terkirim
+    if (dequeue()) {
+        saveQueueToCSV();
+        Serial.println("Data dequeued and CSV updated");
     }
   }
 }
