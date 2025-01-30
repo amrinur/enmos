@@ -26,6 +26,20 @@ typedef struct {
   float F;
 } READING;
 
+// Tambahkan struktur untuk menyimpan data dengan timestamp
+typedef struct {
+  String timestamp;
+  float temp;
+  float hum;
+  float volt;
+  float freq;
+} SensorData;
+
+// Tambahkan array untuk menyimpan data
+const int MAX_BUFFER = 10;
+SensorData dataBuffer[MAX_BUFFER];
+int bufferIndex = 0;
+
 unsigned long previousMillis2 = 0;
 const long INTERVAL = 20000;        // 20 detik untuk pembacaan sensor
 unsigned long previousMillisCSV = 0;
@@ -115,6 +129,10 @@ void loop() {
     float humidity = sht.getHumidity();
     
     DateTime now = rtc.now();
+    char timestamp[20];
+    snprintf(timestamp, sizeof(timestamp), "%04d/%02d/%02d %02d:%02d:%02d",
+             now.year(), now.month(), now.day(),
+             now.hour(), now.minute(), now.second());
     
     // Read Modbus data
     READING r;
@@ -127,7 +145,7 @@ void loop() {
       r.F = 0;
     }
 
-    // Jika WiFi mati, simpan ke CSV
+    // Simpan data dengan timestamp
     if (!wifiConnected) {
         // Write to CSV
         if (!SD.exists(filename)) {
@@ -142,23 +160,21 @@ void loop() {
         if (file) {
             char buffer[128];
             snprintf(buffer, sizeof(buffer), 
-                     "%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
-                      now.year(), now.month(), now.day(),
-                      now.hour(), now.minute(), now.second(),
-                      temperature, humidity, r.V, r.F);
-
+                     "%s;%.2f;%.2f;%.2f;%.2f\n",
+                     timestamp, temperature, humidity, r.V, r.F);
             
             file.print(buffer);
             file.close();
             Serial.println("WiFi down, data saved to CSV");
         }
     } else {
-        // Jika WiFi tersambung, kirim langsung ke ESP
+        // Jika WiFi tersambung, kirim langsung ke ESP dengan timestamp
         String datakirim = String("1#") + 
                          String(r.V, 2) + "#" +
                          String(r.F, 2) + "#" +
                          String(temperature, 2) + "#" +
-                         String(humidity, 2);
+                         String(humidity, 2) + "#" +
+                         String(timestamp);
         
         serial.println(datakirim);
         Serial.println("WiFi up, data sent directly");
@@ -202,7 +218,8 @@ void loop() {
             
             temp.trim(); hum.trim(); volt.trim(); freq.trim();
             
-            String datakirim = String("1#") + volt + "#" + freq + "#" + temp + "#" + hum;
+            String datakirim = String("1#") + volt + "#" + freq + "#" + 
+                              temp + "#" + hum + "#" + timestamp;
             serial.println(datakirim);
             Serial.println("Sent backup data: " + datakirim);
             
@@ -235,13 +252,6 @@ void loop() {
           writeFile.print(remainingData);
           writeFile.close();
           Serial.println("File updated with remaining data");
-        }
-      } else {
-        // Jika tidak ada sisa data, buat file baru dengan header
-        File writeFile = SD.open(filename, FILE_WRITE);
-        if (writeFile) {
-          writeFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
-          writeFile.close();
         }
       }
     }
