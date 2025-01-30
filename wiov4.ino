@@ -26,27 +26,13 @@ typedef struct {
   float F;
 } READING;
 
-// Tambahkan struktur untuk menyimpan data dengan timestamp
-typedef struct {
-  String timestamp;
-  float temp;
-  float hum;
-  float volt;
-  float freq;
-} SensorData;
-
-// Tambahkan array untuk menyimpan data
-const int MAX_BUFFER = 10;
-SensorData dataBuffer[MAX_BUFFER];
-int bufferIndex = 0;
-
 unsigned long previousMillis2 = 0;
 const long INTERVAL = 20000;        // 20 detik untuk pembacaan sensor
 unsigned long previousMillisCSV = 0;
 const long CSV_READ_INTERVAL = 10000;  // 20 detik untuk pengiriman data
 unsigned long previousMillisSensor = 0;
 
-char filename[25] = "/muftir.csv";
+char filename[25] = "/muftim.csv";
 
 void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -129,10 +115,6 @@ void loop() {
     float humidity = sht.getHumidity();
     
     DateTime now = rtc.now();
-    char timestamp[20];
-    snprintf(timestamp, sizeof(timestamp), "%04d/%02d/%02d %02d:%02d:%02d",
-             now.year(), now.month(), now.day(),
-             now.hour(), now.minute(), now.second());
     
     // Read Modbus data
     READING r;
@@ -145,7 +127,7 @@ void loop() {
       r.F = 0;
     }
 
-    // Simpan data dengan timestamp
+    // Jika WiFi mati, simpan ke CSV
     if (!wifiConnected) {
         // Write to CSV
         if (!SD.exists(filename)) {
@@ -160,21 +142,23 @@ void loop() {
         if (file) {
             char buffer[128];
             snprintf(buffer, sizeof(buffer), 
-                     "%s;%.2f;%.2f;%.2f;%.2f\n",
-                     timestamp, temperature, humidity, r.V, r.F);
+                     "%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f\n",
+                      now.year(), now.month(), now.day(),
+                      now.hour(), now.minute(), now.second(),
+                      temperature, humidity, r.V, r.F);
+
             
             file.print(buffer);
             file.close();
             Serial.println("WiFi down, data saved to CSV");
         }
     } else {
-        // Jika WiFi tersambung, kirim langsung ke ESP dengan timestamp
+        // Jika WiFi tersambung, kirim langsung ke ESP
         String datakirim = String("1#") + 
                          String(r.V, 2) + "#" +
                          String(r.F, 2) + "#" +
                          String(temperature, 2) + "#" +
-                         String(humidity, 2) + "#" +
-                         String(timestamp);
+                         String(humidity, 2);
         
         serial.println(datakirim);
         Serial.println("WiFi up, data sent directly");
@@ -205,8 +189,9 @@ void loop() {
           }
           
           if (semicolons == 4) {
-            // Proses dan kirim data
+            // Ekstrak timestamp dan data
             int pos1 = line.indexOf(';');
+            String timestamp = line.substring(0, pos1); // Ambil timestamp
             int pos2 = line.indexOf(';', pos1 + 1);
             int pos3 = line.indexOf(';', pos2 + 1);
             int pos4 = line.indexOf(';', pos3 + 1);
@@ -216,14 +201,15 @@ void loop() {
             String volt = line.substring(pos3 + 1, pos4);
             String freq = line.substring(pos4 + 1);
             
-            temp.trim(); hum.trim(); volt.trim(); freq.trim();
+            temp.trim(); hum.trim(); volt.trim(); freq.trim(); timestamp.trim();
             
+            // Format baru: 1#voltage#frequency#temperature#humidity#timestamp
             String datakirim = String("1#") + volt + "#" + freq + "#" + 
-                              temp + "#" + hum + "#" + timestamp;
-            serial.println(datakirim);
-            Serial.println("Sent backup data: " + datakirim);
+                             temp + "#" + hum + "#" + timestamp;
             
-            // Tunggu sedikit sebelum mengirim data berikutnya
+            serial.println(datakirim);
+            Serial.println("Sent backup data with timestamp: " + datakirim);
+            
             delay(100);
             linesProcessed++;
           }
