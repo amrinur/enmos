@@ -3,36 +3,31 @@
 #include <SoftwareSerial.h>
 #include <ModbusMaster.h>
 #include <SHT31.h>
-#include "RTC_SAMD51.h"
-#include "DateTime.h"
-#include "Wire.h"
-#include <rpcWiFi.h>    // Tambahkan library WiFi untuk Wio Terminal
+#include <rpcWiFi.h>
 
-RTC_SAMD51 rtc;
-SHT31 sht;
 SoftwareSerial serial(D2, D3);      // For data transmission
 SoftwareSerial SerialMod(D1, D0);   // For Modbus
 ModbusMaster node;
+SHT31 sht;
 
-// Konfigurasi WiFi
+// WiFi config
 const char* ssid = "lime";
 const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 14000; // Cek WiFi setiap 30 detik
+const long WIFI_CHECK_INTERVAL = 14000;
+
+// File and timing
+char filename[25] = "/mesinmf.csv";
+unsigned long previousMillis = 0;
+unsigned long previousMillisSensor = 0;
+const long INTERVAL = 10000;        // Interval kirim data SD
+const long SENSOR_INTERVAL = 30000; // Interval baca sensor
 
 typedef struct {
   float V;
   float F;
 } READING;
-
-unsigned long previousMillis2 = 0;
-const long INTERVAL = 20000;        // 20 detik untuk pembacaan sensor
-unsigned long previousMillisCSV = 0;
-const long CSV_READ_INTERVAL = 10000;  // 20 detik untuk pengiriman data
-unsigned long previousMillisSensor = 0;
-
-char filename[25] = "/muftir.csv";
 
 void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -57,209 +52,151 @@ void checkWiFiConnection() {
 }
 
 void setup() {
-  Serial.begin(115200);
-  serial.begin(19200);
-  SerialMod.begin(9600);
-  
-  Wire.begin();
-  sht.begin(0x44);
-  rtc.begin();
-  
-  DateTime now = DateTime(F(__DATE__), F(__TIME__));
-  rtc.adjust(now);
-  
-  node.begin(17, SerialMod);
-  
-  if (!SD.begin(SDCARD_SS_PIN)) {
-    Serial.println("SD card initialization failed!");
-    return;
-  }
-  Serial.println("SD card initialized.");
-
-  // Inisialisasi WiFi
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.println("Connecting to WiFi...");
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-      delay(500);
-      attempts++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-      wifiConnected = true;
-      Serial.println("WiFi connected");
-  } else {
-      Serial.println("WiFi connection failed");
-  }
+    Serial.begin(115200);
+    serial.begin(19200);
+    SerialMod.begin(9600);
+    
+    Wire.begin();
+    sht.begin(0x44);
+    node.begin(17, SerialMod);
+    
+    if (!SD.begin(SDCARD_SS_PIN)) {
+        Serial.println("SD card initialization failed!");
+        return;
+    }
+    
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    Serial.println("SD card initialized.");
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
+    unsigned long currentMillis = millis();
 
-  // Cek status WiFi setiap 30 detik
-  if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
-      previousWiFiCheck = currentMillis;
-      checkWiFiConnection();
-  }
-
-  // Baca sensor dan tulis ke CSV setiap 20 detik
-  if (currentMillis - previousMillisSensor >= INTERVAL) {
-    previousMillisSensor = currentMillis;
-    Serial.println("Reading sensors..."); // Debug
-    
-    // Read sensors
-    sht.read();
-    float temperature = sht.getTemperature();
-    float humidity = sht.getHumidity();
-    
-    DateTime now = rtc.now();
-    
-    // Read Modbus data
-    READING r;
-    uint8_t result = node.readHoldingRegisters(0002, 10);
-    if (result == node.ku8MBSuccess) {
-      r.V = (float)node.getResponseBuffer(0x00) / 100;
-      r.F = (float)node.getResponseBuffer(0x09) / 100;
-    } else {
-      r.V = 0;
-      r.F = 0;
+    // Cek WiFi setiap 14 detik
+    if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
+        previousWiFiCheck = currentMillis;
+        checkWiFiConnection();
     }
 
-    // Jika WiFi mati, simpan ke CSV
-    if (!wifiConnected) {
-        // Write to CSV
-        if (!SD.exists(filename)) {
-            File headerFile = SD.open(filename, FILE_WRITE);
-            if (headerFile) {
-                headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency;Status");
-                headerFile.close();
+    // Baca sensor setiap 20 detik
+    if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
+        previousMillisSensor = currentMillis;
+        
+        // Baca sensor SHT31
+        sht.read();
+        float temperature = sht.getTemperature();
+        float humidity = sht.getHumidity();
+        
+        // Baca Modbus
+        READING r;
+        uint8_t result = node.readHoldingRegisters(0002, 10);
+        if (result == node.ku8MBSuccess) {
+            r.V = (float)node.getResponseBuffer(0x00) / 100;
+            r.F = (float)node.getResponseBuffer(0x09) / 100;
+        } else {
+            r.V = 0;
+            r.F = 0;
+        }
+
+        if (!wifiConnected) {
+            // Backup ke SD jika WiFi mati
+            if (!SD.exists(filename)) {
+                File headerFile = SD.open(filename, FILE_WRITE);
+                if (headerFile) {
+                    headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
+                    headerFile.close();
+                }
+            }
+            
+            File dataFile = SD.open(filename, FILE_WRITE);
+            if (dataFile) {
+                char buffer[128];
+                snprintf(buffer, sizeof(buffer), 
+                         "%s;%.2f;%.2f;%.2f;%.2f\n",
+                         "backup",
+                         temperature, humidity, r.V, r.F);
+                dataFile.print(buffer);
+                dataFile.close();
+                Serial.println("Data backed up to SD");
+            }
+        } else {
+            // Kirim langsung jika WiFi hidup
+            String datakirim = String("1#") + 
+                             String(r.V, 2) + "#" +
+                             String(r.F, 2) + "#" +
+                             String(temperature, 2) + "#" +
+                             String(humidity, 2);
+            serial.println(datakirim);
+            Serial.println("Data sent directly");
+        }
+    }
+
+    // Kirim data backup dari SD jika WiFi hidup
+    if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
+        previousMillis = currentMillis;
+        Serial.println("Processing CSV..."); 
+        
+        File readFile = SD.open(filename);
+        if (readFile && readFile.available()) {
+            // Skip header
+            String header = readFile.readStringUntil('\n');
+            String remainingData = header + "\n";
+            bool dataSent = false;
+            
+            // Baca satu baris data
+            if (readFile.available()) {
+                String line = readFile.readStringUntil('\n');
+                if (line.length() > 0) {
+                    int semicolons = 0;
+                    for (unsigned int i = 0; i < line.length(); i++) {
+                        if (line[i] == ';') semicolons++;
+                    }
+                    
+                    if (semicolons == 4) {
+                        // Ekstrak dan kirim data
+                        int pos1 = line.indexOf(';');
+                        int pos2 = line.indexOf(';', pos1 + 1);
+                        int pos3 = line.indexOf(';', pos2 + 1);
+                        int pos4 = line.indexOf(';', pos3 + 1);
+                        
+                        String temp = line.substring(pos1 + 1, pos2);
+                        String hum = line.substring(pos2 + 1, pos3);
+                        String volt = line.substring(pos3 + 1, pos4);
+                        String freq = line.substring(pos4 + 1);
+                        
+                        temp.trim(); hum.trim(); volt.trim(); freq.trim();
+                        
+                        String datakirim = String("1#") + volt + "#" + freq + "#" + 
+                                         temp + "#" + hum;
+                        
+                        serial.println(datakirim);
+                        Serial.println("Sent data: " + datakirim);
+                        dataSent = true;
+                    }
+                }
+            }
+            
+            // Salin sisa data
+            while (readFile.available()) {
+                remainingData += readFile.readStringUntil('\n');
+                if (readFile.available()) {
+                    remainingData += '\n';
+                }
+            }
+            
+            readFile.close();
+            
+            // Update file jika ada data yang terkirim
+            if (dataSent) {
+                SD.remove(filename);
+                File writeFile = SD.open(filename, FILE_WRITE);
+                if (writeFile) {
+                    writeFile.print(remainingData);
+                    writeFile.close();
+                    Serial.println("File updated with remaining data");
+                }
             }
         }
-        
-        File file = SD.open(filename, FILE_WRITE);
-        if (file) {
-            char buffer[128];
-            snprintf(buffer, sizeof(buffer), 
-                     "%04d/%02d/%02d %02d:%02d:%02d;%.2f;%.2f;%.2f;%.2f;0\n",
-                      now.year(), now.month(), now.day(),
-                      now.hour(), now.minute(), now.second(),
-                      temperature, humidity, r.V, r.F);
-            
-            file.print(buffer);
-            file.close();
-            Serial.println("WiFi down, data saved to CSV with status 0");
-        }
-    } else {
-        // Jika WiFi tersambung, kirim langsung ke ESP
-        String datakirim = String("1#") + 
-                         String(r.V, 2) + "#" +
-                         String(r.F, 2) + "#" +
-                         String(temperature, 2) + "#" +
-                         String(humidity, 2);
-        
-        serial.println(datakirim);
-        Serial.println("WiFi up, data sent directly");
     }
-  }
-
-  // Kirim data dari CSV hanya jika WiFi terhubung
-  if (currentMillis - previousMillisCSV >= CSV_READ_INTERVAL && wifiConnected) {
-    previousMillisCSV = currentMillis;
-    Serial.println("Processing CSV..."); 
-    
-    File readFile = SD.open(filename);
-    if (readFile && readFile.available()) {
-      // Skip header
-      String header = readFile.readStringUntil('\n');
-      
-      // Baca maksimal 5 baris data setiap interval
-      int linesProcessed = 0;
-      String remainingData = "";
-      bool headerAdded = false;
-      
-      while (readFile.available() && linesProcessed < 5) {
-        String line = readFile.readStringUntil('\n');
-        if (line.length() > 0) {
-          int semicolons = 0;
-          for (unsigned int i = 0; i < line.length(); i++) {
-            if (line[i] == ';') semicolons++;
-          }
-          
-          if (semicolons == 5) { // Update untuk 6 kolom
-            // Ekstrak timestamp dan data
-            int pos1 = line.indexOf(';');
-            String timestamp = line.substring(0, pos1);
-            int pos2 = line.indexOf(';', pos1 + 1);
-            int pos3 = line.indexOf(';', pos2 + 1);
-            int pos4 = line.indexOf(';', pos3 + 1);
-            int pos5 = line.indexOf(';', pos4 + 1);
-            
-            String temp = line.substring(pos1 + 1, pos2);
-            String hum = line.substring(pos2 + 1, pos3);
-            String volt = line.substring(pos3 + 1, pos4);
-            String freq = line.substring(pos4 + 1, pos5);
-            String status = line.substring(pos5 + 1);
-            
-            status.trim();
-            
-            // Hanya proses jika status = 0
-            if (status == "0") {
-              temp.trim(); hum.trim(); volt.trim(); freq.trim(); timestamp.trim();
-              
-              String datakirim = String("1#") + volt + "#" + freq + "#" + 
-                               temp + "#" + hum + "#" + timestamp;
-              
-              serial.println(datakirim);
-              Serial.println("Sent backup data with timestamp: " + datakirim);
-              
-              // Tandai sebagai sudah terkirim dalam remainingData
-              if (!headerAdded) {
-                remainingData = "Timestamp;Temperature;Humidity;Voltage;Frequency;Status\n";
-                headerAdded = true;
-              }
-              remainingData += timestamp + ";" + temp + ";" + hum + ";" + 
-                              volt + ";" + freq + ";1\n";
-              
-              delay(100);
-              linesProcessed++;
-            } else {
-              // Salin baris yang sudah terkirim ke remainingData
-              if (!headerAdded) {
-                remainingData = "Timestamp;Temperature;Humidity;Voltage;Frequency;Status\n";
-                headerAdded = true;
-              }
-              remainingData += line + "\n";
-            }
-          }
-        }
-        
-        // Simpan sisa data yang belum diproses
-        while (readFile.available()) {
-          String remainingLine = readFile.readStringUntil('\n');
-          if (!headerAdded) {
-            remainingData = "Timestamp;Temperature;Humidity;Voltage;Frequency;Status\n";
-            headerAdded = true;
-          }
-          if (remainingLine.length() > 0) {
-            remainingData += remainingLine + "\n";
-          }
-        }
-      }
-      
-      readFile.close();
-      
-      // Tulis ulang file dengan sisa data
-      if (remainingData.length() > 0) {
-        SD.remove(filename);
-        File writeFile = SD.open(filename, FILE_WRITE);
-        if (writeFile) {
-          writeFile.print(remainingData);
-          writeFile.close();
-          Serial.println("File updated with remaining data");
-        }
-      }
-    }
-  }
 }
