@@ -58,6 +58,12 @@ int countDataLines();
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, bool modbusOK, bool wifiOK, bool sensorOK);
 void setupDisplay();
 
+// Tambahkan fungsi pembaca RTC (placeholder, ganti dengan RTC.asli)
+unsigned long getRTCTime() {
+    // Contoh: RTC membaca waktu sebenarnya, di sini masih menggunakan millis()
+    return startTime + (millis() / 1000);
+}
+
 void setup() {
     // Initialize Serial communications
     Serial.begin(115200);
@@ -143,12 +149,14 @@ void loop() {
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
         
-        // Hitung current timestamp dari NTP
-        unsigned long currentTimestamp = startTime + (currentMillis / 1000);
+        // Baca waktu dari RTC
+        unsigned long rtcTime = getRTCTime();
         unsigned long dataTimestamp;
-        // Jika belum ada patokan, tulis baris patokan ke CSV
         if (!baselineRecorded) {
-            dataTimestamp = currentTimestamp;  // gunakan nilai absolute sebagai patokan
+            // Baseline diambil dari waktu RTC yang didapat NTP
+            baselineTimestamp = rtcTime;
+            baselineRecorded = true;
+            // Tulis baseline ke CSV dengan label khusus
             if (!SD.exists(filename)) {
                 File headerFile = SD.open(filename, FILE_WRITE);
                 if (headerFile) {
@@ -156,19 +164,14 @@ void loop() {
                     headerFile.close();
                 }
             }
-            // Tulis data patokan (tidak dikirim, hanya lokal), bisa gunakan marker atau nilai asli
             File baseFile = SD.open(filename, FILE_WRITE);
             if (baseFile) {
-                baseFile.printf("%.2f;%.2f;%.2f;%.2f;%lu_baseline\n", 0.0, 0.0, 0.0, 0.0, currentTimestamp);
+                baseFile.printf("%.2f;%.2f;%.2f;%.2f;%lu_rtc_ref\n", 0.0, 0.0, 0.0, 0.0, rtcTime);
                 baseFile.close();
             }
-            baselineTimestamp = currentTimestamp;
-            baselineRecorded = true;
-            // Untuk pembacaan pertama, selisih dianggap 0
             dataTimestamp = 0;
         } else {
-            // Hitung elapsed time sebagai selisih dari patokan
-            dataTimestamp = currentTimestamp - baselineTimestamp;
+            dataTimestamp = rtcTime - baselineTimestamp;
         }
         
         // Read SHT31 sensor
