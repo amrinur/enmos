@@ -6,8 +6,8 @@
 #include <rpcWiFi.h>
 #include "TFT_eSPI.h"
 #include "Free_Fonts.h"
-#include "RTC_SAMD51.h"
-#include "DateTime.h"
+#include <WiFiUdp.h>
+#include <NTPClient.h>
 
 // Display setup
 TFT_eSPI tft;
@@ -47,8 +47,10 @@ typedef struct {
     float F;
 } READING;
 
-// Add RTC object
-RTC_SAMD51 rtc;
+// Tambahkan variabel global untuk NTP
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200, 60000); // Offset 25200 detik untuk WIB
+unsigned long baseTime = 0;  // Waktu epoch yang diambil dari NTP
 
 // Function declarations
 void checkWiFiConnection();
@@ -90,19 +92,16 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
         Serial.println("WiFi Connected!");
+        
+        // Inisialisasi NTP
+        timeClient.begin();
+        while (!timeClient.update()) {
+            delay(500);
+        }
+        baseTime = timeClient.getEpochTime();
+        Serial.print("NTP time (base): ");
+        Serial.println(baseTime);
     }
-    
-    // Initialize RTC with current compile time
-    rtc.begin();
-    DateTime now = DateTime(F(__DATE__), F(__TIME__));
-    rtc.adjust(now);
-    
-    // Verify RTC time
-    now = rtc.now();
-    Serial.print("RTC set to: ");
-    Serial.printf("%04d/%02d/%02d %02d:%02d:%02d\n",
-        now.year(), now.month(), now.day(),
-        now.hour(), now.minute(), now.second());
     
     // Initialize Display
     setupDisplay();
@@ -150,12 +149,10 @@ void loop() {
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
         
-        // Get current timestamp
-        DateTime now = rtc.now();
+        // Hitung timestamp menggunakan baseTime + uptime (dalam detik)
+        unsigned long currentEpoch = baseTime + currentMillis / 1000;
         char timestamp[20];
-        sprintf(timestamp, "%04d%02d%02d%02d%02d%02d",
-                now.year(), now.month(), now.day(),
-                now.hour(), now.minute(), now.second());
+        sprintf(timestamp, "%lu", currentEpoch);
         
         // Read SHT31 sensor
         sht.read();
