@@ -51,11 +51,9 @@ typedef struct {
 // Add RTC object
 RTC_DS3231 rtc;
 
-// Add NTP settings
+// Update NTP settings to Indonesian server
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200); // UTC +7 offset (7*3600)
-unsigned long lastNTPSync = 0;
-const long NTP_SYNC_INTERVAL = 3600000; // Sync every hour
+NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200); // Using Indonesian NTP server, UTC+7 offset
 
 // Function declarations
 void checkWiFiConnection();
@@ -145,12 +143,6 @@ void loop() {
     if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
         previousWiFiCheck = currentMillis;
         checkWiFiConnection();
-    }
-    
-    // Add NTP sync check
-    if (wifiConnected && (currentMillis - lastNTPSync >= NTP_SYNC_INTERVAL)) {
-        lastNTPSync = currentMillis;
-        syncTimeFromNTP();
     }
     
     // Read sensors and update display
@@ -443,7 +435,7 @@ void syncTimeFromNTP() {
         if (timeClient.update()) {
             time_t epochTime = timeClient.getEpochTime();
             rtc.adjust(DateTime(epochTime));
-            Serial.println("RTC synced with NTP");
+            Serial.println("RTC initialized via NTP (Indonesia)");
         }
         timeClient.end();
     }
