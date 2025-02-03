@@ -26,7 +26,7 @@ const char* ssid = "lime";
 const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 14000;
+const long WIFI_CHECK_INTERVAL = 7000;
 
 // File and timing
 char filename[25] = "/mesinmf.csv";
