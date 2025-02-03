@@ -7,8 +7,8 @@
 #include "TFT_eSPI.h"
 #include "Free_Fonts.h"
 #include <RTClib.h>  // Add RTC library
-#include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <NTPClient.h>
 
 // Display setup
 TFT_eSPI tft;
@@ -51,16 +51,15 @@ typedef struct {
 // Add RTC object
 RTC_DS3231 rtc;
 
-// Update NTP settings to Indonesian server
+// Update NTP settings
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000); // Increased timeout to 60s
+NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200); // Indonesia timezone offset
 
 // Function declarations
 void checkWiFiConnection();
 int countDataLines();
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, bool modbusOK, bool wifiOK, bool sensorOK);
 void setupDisplay();
-void syncTimeFromNTP();
 
 void setup() {
     // Initialize Serial communications
@@ -80,62 +79,45 @@ void setup() {
     }
     Serial.println("SD card initialized.");
     
-    // Initialize WiFi first and wait until connected
+    // Initialize WiFi and RTC
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     
-    Serial.print("Connecting to WiFi");
+    Serial.print("Connecting to WiFi for NTP sync");
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(1000);
+        delay(500);
         Serial.print(".");
         attempts++;
     }
     Serial.println();
     
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("WiFi Connected!");
         wifiConnected = true;
+        Serial.println("WiFi Connected!");
         
-        // Initialize RTC
         if (!rtc.begin()) {
             Serial.println("RTC not found!");
             return;
         }
         
-        // Force NTP sync
-        Serial.println("Starting NTP sync...");
+        // One-time NTP sync on startup
         timeClient.begin();
-        delay(2000); // Give NTP some time
-        
-        bool ntpSuccess = false;
-        for(int i = 0; i < 5; i++) {
-            Serial.print("NTP attempt ");
-            Serial.println(i + 1);
-            if (timeClient.forceUpdate()) {
-                ntpSuccess = true;
-                unsigned long epochTime = timeClient.getEpochTime();
-                Serial.print("NTP Time: ");
-                Serial.println(epochTime);
-                rtc.adjust(DateTime(epochTime));
-                Serial.println("RTC updated successfully!");
-                break;
-            }
-            delay(1000);
+        if (timeClient.update()) {
+            unsigned long epochTime = timeClient.getEpochTime();
+            rtc.adjust(DateTime(epochTime));
+            Serial.print("RTC initialized with Unix time: ");
+            Serial.println(epochTime);
+        } else {
+            Serial.println("NTP sync failed, using compile time");
+            rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
         }
-        
-        if (!ntpSuccess) {
-            Serial.println("NTP sync failed!");
-        }
+        timeClient.end();
         
         // Verify RTC time
         DateTime now = rtc.now();
-        Serial.print("RTC time after sync: ");
-        Serial.printf("%04d-%02d-%02d %02d:%02d:%02d\n",
-            now.year(), now.month(), now.day(),
-            now.hour(), now.minute(), now.second());
-    } else {
-        Serial.println("WiFi connection failed!");
+        Serial.print("Unix timestamp: ");
+        Serial.println(now.unixtime());
     }
     
     // Initialize Display
@@ -194,10 +176,8 @@ void loop() {
         
         // Get current timestamp - modified format
         DateTime now = rtc.now();
-        char timestamp[20];
-        sprintf(timestamp, "%04d%02d%02d%02d%02d%02d",
-                now.year(), now.month(), now.day(),
-                now.hour(), now.minute(), now.second());
+        char timestamp[11]; // Only need space for unix timestamp
+        sprintf(timestamp, "%lu", now.unixtime());
         
         // Read SHT31 sensor
         sht.read();
@@ -470,16 +450,4 @@ int countDataLines() {
         readFile.close();
     }
     return lineCount;
-}
-
-void syncTimeFromNTP() {
-    if (wifiConnected) {
-        timeClient.begin();
-        if (timeClient.update()) {
-            time_t epochTime = timeClient.getEpochTime();
-            rtc.adjust(DateTime(epochTime));
-            Serial.println("RTC initialized via NTP (Indonesia)");
-        }
-        timeClient.end();
-    }
 }
