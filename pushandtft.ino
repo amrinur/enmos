@@ -26,7 +26,7 @@ const char* ssid = "lime";
 const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 7000;
+const long WIFI_CHECK_INTERVAL = 14000;
 
 // File and timing
 char filename[25] = "/mesinmf.csv";
@@ -80,23 +80,54 @@ void setup() {
     }
     Serial.println("SD card initialized.");
     
-    // Initialize WiFi
+    // Initialize WiFi and wait for connection
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     
+    Serial.println("Connecting to WiFi...");
+    int wifiAttempts = 0;
+    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 20) {
+        delay(500);
+        Serial.print(".");
+        wifiAttempts++;
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiConnected = true;
+        Serial.println("\nWiFi connected");
+        
+        // Initialize RTC and sync time
+        if (!rtc.begin()) {
+            Serial.println("RTC initialization failed!");
+            return;
+        }
+        
+        // Force NTP sync on startup
+        Serial.println("Syncing RTC with NTP...");
+        timeClient.begin();
+        int ntpAttempts = 0;
+        bool ntpSuccess = false;
+        
+        while (!ntpSuccess && ntpAttempts < 5) {
+            if (timeClient.update()) {
+                time_t epochTime = timeClient.getEpochTime();
+                rtc.adjust(DateTime(epochTime));
+                Serial.println("RTC synced successfully");
+                ntpSuccess = true;
+            }
+            ntpAttempts++;
+            delay(1000);
+        }
+        timeClient.end();
+        
+        if (!ntpSuccess) {
+            Serial.println("NTP sync failed, using compile time");
+            rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        }
+    }
+    
     // Initialize Display
     setupDisplay();
-    
-    // Initialize RTC with proper error checking and time setting
-    if (!rtc.begin()) {
-        Serial.println("RTC initialization failed!");
-        return;
-    }
-    
-    // Initial NTP sync if WiFi is connected
-    if (WiFi.status() == WL_CONNECTED) {
-        syncTimeFromNTP();
-    }
     
     // Uncomment these lines on first upload to set the RTC time
     // Comment them again after uploading once
