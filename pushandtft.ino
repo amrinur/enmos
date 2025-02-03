@@ -53,7 +53,7 @@ RTC_DS3231 rtc;
 
 // Update NTP settings to Indonesian server
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200); // Using Indonesian NTP server, UTC+7 offset
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000); // Increased timeout to 60s
 
 // Function declarations
 void checkWiFiConnection();
@@ -80,50 +80,62 @@ void setup() {
     }
     Serial.println("SD card initialized.");
     
-    // Initialize WiFi and wait for connection
+    // Initialize WiFi first and wait until connected
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     
-    Serial.println("Connecting to WiFi...");
-    int wifiAttempts = 0;
-    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 20) {
-        delay(500);
+    Serial.print("Connecting to WiFi");
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+        delay(1000);
         Serial.print(".");
-        wifiAttempts++;
+        attempts++;
     }
+    Serial.println();
     
     if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("WiFi Connected!");
         wifiConnected = true;
-        Serial.println("\nWiFi connected");
         
-        // Initialize RTC and sync time
+        // Initialize RTC
         if (!rtc.begin()) {
-            Serial.println("RTC initialization failed!");
+            Serial.println("RTC not found!");
             return;
         }
         
-        // Force NTP sync on startup
-        Serial.println("Syncing RTC with NTP...");
+        // Force NTP sync
+        Serial.println("Starting NTP sync...");
         timeClient.begin();
-        int ntpAttempts = 0;
-        bool ntpSuccess = false;
+        delay(2000); // Give NTP some time
         
-        while (!ntpSuccess && ntpAttempts < 5) {
-            if (timeClient.update()) {
-                time_t epochTime = timeClient.getEpochTime();
-                rtc.adjust(DateTime(epochTime));
-                Serial.println("RTC synced successfully");
+        bool ntpSuccess = false;
+        for(int i = 0; i < 5; i++) {
+            Serial.print("NTP attempt ");
+            Serial.println(i + 1);
+            if (timeClient.forceUpdate()) {
                 ntpSuccess = true;
+                unsigned long epochTime = timeClient.getEpochTime();
+                Serial.print("NTP Time: ");
+                Serial.println(epochTime);
+                rtc.adjust(DateTime(epochTime));
+                Serial.println("RTC updated successfully!");
+                break;
             }
-            ntpAttempts++;
             delay(1000);
         }
-        timeClient.end();
         
         if (!ntpSuccess) {
-            Serial.println("NTP sync failed, using compile time");
-            rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+            Serial.println("NTP sync failed!");
         }
+        
+        // Verify RTC time
+        DateTime now = rtc.now();
+        Serial.print("RTC time after sync: ");
+        Serial.printf("%04d-%02d-%02d %02d:%02d:%02d\n",
+            now.year(), now.month(), now.day(),
+            now.hour(), now.minute(), now.second());
+    } else {
+        Serial.println("WiFi connection failed!");
     }
     
     // Initialize Display
