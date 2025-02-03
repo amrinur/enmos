@@ -6,9 +6,8 @@
 #include <rpcWiFi.h>
 #include "TFT_eSPI.h"
 #include "Free_Fonts.h"
-#include <RTClib.h>  // Add RTC library
-#include <WiFiUdp.h>
-#include <NTPClient.h>
+#include "RTC_SAMD51.h"
+#include "DateTime.h"
 
 // Display setup
 TFT_eSPI tft;
@@ -49,11 +48,7 @@ typedef struct {
 } READING;
 
 // Add RTC object
-RTC_DS3231 rtc;
-
-// Update NTP settings
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200); // Indonesia timezone offset
+RTC_SAMD51 rtc;
 
 // Function declarations
 void checkWiFiConnection();
@@ -79,11 +74,11 @@ void setup() {
     }
     Serial.println("SD card initialized.");
     
-    // Initialize WiFi and RTC
+    // Initialize WiFi
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     
-    Serial.print("Connecting to WiFi for NTP sync");
+    Serial.print("Connecting to WiFi");
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
         delay(500);
@@ -95,30 +90,20 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
         Serial.println("WiFi Connected!");
-        
-        if (!rtc.begin()) {
-            Serial.println("RTC not found!");
-            return;
-        }
-        
-        // One-time NTP sync on startup
-        timeClient.begin();
-        if (timeClient.update()) {
-            unsigned long epochTime = timeClient.getEpochTime();
-            rtc.adjust(DateTime(epochTime));
-            Serial.print("RTC initialized with Unix time: ");
-            Serial.println(epochTime);
-        } else {
-            Serial.println("NTP sync failed, using compile time");
-            rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-        }
-        timeClient.end();
-        
-        // Verify RTC time
-        DateTime now = rtc.now();
-        Serial.print("Unix timestamp: ");
-        Serial.println(now.unixtime());
     }
+    
+    // Initialize RTC
+    rtc.begin();
+    DateTime now = DateTime(F(__DATE__), F(__TIME__));
+    Serial.println("Adjusting RTC time!");
+    rtc.adjust(now);
+    
+    // Verify RTC time
+    now = rtc.now();
+    Serial.print("RTC set to: ");
+    Serial.printf("%04d/%02d/%02d %02d:%02d:%02d\n",
+        now.year(), now.month(), now.day(),
+        now.hour(), now.minute(), now.second());
     
     // Initialize Display
     setupDisplay();
@@ -174,10 +159,12 @@ void loop() {
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
         
-        // Get current timestamp - modified format
+        // Get current timestamp
         DateTime now = rtc.now();
-        char timestamp[11]; // Only need space for unix timestamp
-        sprintf(timestamp, "%lu", now.unixtime());
+        char timestamp[20];
+        sprintf(timestamp, "%04d%02d%02d%02d%02d%02d",
+                now.year(), now.month(), now.day(),
+                now.hour(), now.minute(), now.second());
         
         // Read SHT31 sensor
         sht.read();
