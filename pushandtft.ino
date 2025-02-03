@@ -27,7 +27,7 @@ unsigned long previousWiFiCheck = 0;
 const long WIFI_CHECK_INTERVAL = 14000;
 
 // File and timing
-char filename[25] = "/muftro.csv";
+char filename[25] = "/mesinmf.csv";
 unsigned long previousMillis = 0;
 unsigned long previousMillisSensor = 0;
 const long INTERVAL = 17000;        // Interval kirim data SD
@@ -168,7 +168,7 @@ void loop() {
             if (!SD.exists(filename)) {
                 File headerFile = SD.open(filename, FILE_WRITE);
                 if (headerFile) {
-                    headerFile.println("Timestamp;Temperature;Humidity;Voltage;Frequency");
+                    headerFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
                     headerFile.close();
                 }
             }
@@ -193,29 +193,27 @@ void loop() {
                 File writeFile = SD.open(filename, FILE_WRITE);
                 if (writeFile) {
                     writeFile.print(remainingData);
-                    writeFile.printf("%s;%.2f;%.2f;%.2f;%.2f\n",
-                                   timestamp,
-                                   temperature, humidity, r.V, r.F);
+                    writeFile.printf("%.2f;%.2f;%.2f;%.2f;%s\n",
+                                   temperature, humidity, r.V, r.F, timestamp);
                     writeFile.close();
                 }
             } else {
                 File dataFile = SD.open(filename, FILE_WRITE);
                 if (dataFile) {
-                    dataFile.printf("%s;%.2f;%.2f;%.2f;%.2f\n",
-                                  timestamp,
-                                  temperature, humidity, r.V, r.F);
+                    dataFile.printf("%.2f;%.2f;%.2f;%.2f;%s\n",
+                                  temperature, humidity, r.V, r.F, timestamp);
                     dataFile.close();
                 }
             }
             Serial.println("Data backed up to SD (FIFO)");
         } else {
-            // Modified direct data transmission with timestamp
+            // Modified direct data transmission with correct order
             String datakirim = String("1#") + 
-                             String(timestamp) + "#" +
+                             String(temperature, 2) + "#" +
+                             String(humidity, 2) + "#" +
                              String(r.V, 2) + "#" +
                              String(r.F, 2) + "#" +
-                             String(temperature, 2) + "#" +
-                             String(humidity, 2);
+                             String(timestamp);
             serial.println(datakirim);
             Serial.println("Data sent directly");
         }
@@ -245,15 +243,20 @@ void loop() {
                         int pos3 = line.indexOf(';', pos2 + 1);
                         int pos4 = line.indexOf(';', pos3 + 1);
                         
-                        String temp = line.substring(pos1 + 1, pos2);
-                        String hum = line.substring(pos2 + 1, pos3);
-                        String volt = line.substring(pos3 + 1, pos4);
-                        String freq = line.substring(pos4 + 1);
+                        String temp = line.substring(0, pos1);
+                        String hum = line.substring(pos1 + 1, pos2);
+                        String volt = line.substring(pos2 + 1, pos3);
+                        String freq = line.substring(pos3 + 1, pos4);
+                        String timestamp = line.substring(pos4 + 1);
                         
-                        temp.trim(); hum.trim(); volt.trim(); freq.trim();
+                        temp.trim(); hum.trim(); volt.trim(); freq.trim(); timestamp.trim();
                         
-                        String datakirim = String("1#") + volt + "#" + freq + "#" + 
-                                         temp + "#" + hum;
+                        String datakirim = String("1#") + 
+                                         temp + "#" + 
+                                         hum + "#" + 
+                                         volt + "#" + 
+                                         freq + "#" + 
+                                         timestamp;
                         
                         serial.println(datakirim);
                         dataSent = true;
