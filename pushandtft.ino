@@ -92,10 +92,9 @@ void setup() {
         Serial.println("WiFi Connected!");
     }
     
-    // Initialize RTC
+    // Initialize RTC with current compile time
     rtc.begin();
     DateTime now = DateTime(F(__DATE__), F(__TIME__));
-    Serial.println("Adjusting RTC time!");
     rtc.adjust(now);
     
     // Verify RTC time
@@ -107,14 +106,6 @@ void setup() {
     
     // Initialize Display
     setupDisplay();
-    
-    // Uncomment these lines on first upload to set the RTC time
-    // Comment them again after uploading once
-    if (rtc.lostPower()) {
-        Serial.println("RTC lost power, lets set the time!");
-        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-        // rtc.adjust(DateTime(2024, 1, 21, 15, 30, 0)); // Or set manual time: YY,MM,DD,HH,MM,SS
-    }
     
     // Display initial WiFi scanning message
     tft.fillScreen(TFT_BLACK);
