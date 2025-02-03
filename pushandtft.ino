@@ -6,6 +6,8 @@
 #include <rpcWiFi.h>
 #include "TFT_eSPI.h"
 #include "Free_Fonts.h"
+#include <WiFiUdp.h>
+#include <NTPClient.h>
 
 // Display setup
 TFT_eSPI tft;
@@ -45,12 +47,13 @@ typedef struct {
     float F;
 } READING;
 
-// Tambahkan variabel untuk timestamp
-unsigned long startTime = 0;  // Akan diset di setup()
+// Tambahkan variabel global untuk NTP
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200, 60000); // Offset 25200 detik untuk WIB
+unsigned long baseTime = 0;  // Waktu epoch yang diambil dari NTP
 
-// Tambahkan variabel global baru untuk patokan timestamp
-bool baselineRecorded = false;
-unsigned long baselineTimestamp = 0;
+// Tambah nama file untuk timestamp referensi
+const char* timeRefFile = "/timref.csv";
 
 // Function declarations
 void checkWiFiConnection();
@@ -58,10 +61,26 @@ int countDataLines();
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, bool modbusOK, bool wifiOK, bool sensorOK);
 void setupDisplay();
 
-// Tambahkan fungsi pembaca RTC (placeholder, ganti dengan RTC.asli)
-unsigned long getRTCTime() {
-    // Contoh: RTC membaca waktu sebenarnya, di sini masih menggunakan millis()
-    return startTime + (millis() / 1000);
+// Fungsi untuk membaca timestamp referensi dari SD
+unsigned long getStoredTimestamp() {
+    if (SD.exists(timeRefFile)) {
+        File file = SD.open(timeRefFile);
+        if (file) {
+            String timestamp = file.readStringUntil('\n');
+            file.close();
+            return timestamp.toInt();
+        }
+    }
+    return 0;
+}
+
+// Fungsi untuk menyimpan timestamp referensi
+void saveTimestamp(unsigned long timestamp) {
+    File file = SD.open(timeRefFile, FILE_WRITE);
+    if (file) {
+        file.println(timestamp);
+        file.close();
+    }
 }
 
 void setup() {
@@ -98,10 +117,21 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
         Serial.println("WiFi Connected!");
+        
+        // Inisialisasi NTP
+        timeClient.begin();
+        if (timeClient.update()) {
+            unsigned long ntpTime = timeClient.getEpochTime();
+            saveTimestamp(ntpTime);  // Simpan timestamp NTP ke SD
+            baseTime = ntpTime;
+        } else {
+            baseTime = getStoredTimestamp();  // Gunakan timestamp tersimpan jika NTP gagal
+        }
+        Serial.print("Base time: ");
+        Serial.println(baseTime);
+    } else {
+        baseTime = getStoredTimestamp();  // Gunakan timestamp tersimpan jika offline
     }
-    
-    // Set waktu awal (1 Januari 2024 00:00:00 GMT+7)
-    startTime = 1704047400;  // Unix timestamp untuk 2024-01-01 00:00:00 GMT+7
     
     // Initialize Display
     setupDisplay();
@@ -149,30 +179,8 @@ void loop() {
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
         
-        // Baca waktu dari RTC
-        unsigned long rtcTime = getRTCTime();
-        unsigned long dataTimestamp;
-        if (!baselineRecorded) {
-            // Baseline diambil dari waktu RTC yang didapat NTP
-            baselineTimestamp = rtcTime;
-            baselineRecorded = true;
-            // Tulis baseline ke CSV dengan label khusus
-            if (!SD.exists(filename)) {
-                File headerFile = SD.open(filename, FILE_WRITE);
-                if (headerFile) {
-                    headerFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
-                    headerFile.close();
-                }
-            }
-            File baseFile = SD.open(filename, FILE_WRITE);
-            if (baseFile) {
-                baseFile.printf("%.2f;%.2f;%.2f;%.2f;%lu_rtc_ref\n", 0.0, 0.0, 0.0, 0.0, rtcTime);
-                baseFile.close();
-            }
-            dataTimestamp = 0;
-        } else {
-            dataTimestamp = rtcTime - baselineTimestamp;
-        }
+        // Hitung waktu relatif dari baseTime
+        unsigned long timestamp = baseTime + (currentMillis / 1000);
         
         // Read SHT31 sensor
         sht.read();
@@ -228,15 +236,15 @@ void loop() {
                 File writeFile = SD.open(filename, FILE_WRITE);
                 if (writeFile) {
                     writeFile.print(remainingData);
-                    writeFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
-                                   temperature, humidity, r.V, r.F, dataTimestamp);
+                    writeFile.printf("%.2f;%.2f;%.2f;%.2f;%s\n",
+                                   temperature, humidity, r.V, r.F, timestamp);
                     writeFile.close();
                 }
             } else {
                 File dataFile = SD.open(filename, FILE_WRITE);
                 if (dataFile) {
-                    dataFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
-                                  temperature, humidity, r.V, r.F, dataTimestamp);
+                    dataFile.printf("%.2f;%.2f;%.2f;%.2f;%s\n",
+                                  temperature, humidity, r.V, r.F, timestamp);
                     dataFile.close();
                 }
             }
@@ -248,7 +256,7 @@ void loop() {
                              String(humidity, 2) + "#" +
                              String(r.V, 2) + "#" +
                              String(r.F, 2) + "#" +
-                             String(dataTimestamp);
+                             String(timestamp);
             serial.println(datakirim);
             Serial.println("Data sent directly");
         }
