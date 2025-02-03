@@ -6,8 +6,6 @@
 #include <rpcWiFi.h>
 #include "TFT_eSPI.h"
 #include "Free_Fonts.h"
-#include <WiFiUdp.h>
-#include <NTPClient.h>
 
 // Display setup
 TFT_eSPI tft;
@@ -47,10 +45,12 @@ typedef struct {
     float F;
 } READING;
 
-// Tambahkan variabel global untuk NTP
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "id.pool.ntp.org", 25200, 60000); // Offset 25200 detik untuk WIB
-unsigned long baseTime = 0;  // Waktu epoch yang diambil dari NTP
+// Tambahkan variabel untuk timestamp
+unsigned long startTime = 0;  // Akan diset di setup()
+
+// Tambahkan variabel global baru untuk patokan timestamp
+bool baselineRecorded = false;
+unsigned long baselineTimestamp = 0;
 
 // Function declarations
 void checkWiFiConnection();
@@ -92,16 +92,10 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
         Serial.println("WiFi Connected!");
-        
-        // Inisialisasi NTP
-        timeClient.begin();
-        while (!timeClient.update()) {
-            delay(500);
-        }
-        baseTime = timeClient.getEpochTime();
-        Serial.print("NTP time (base): ");
-        Serial.println(baseTime);
     }
+    
+    // Set waktu awal (1 Januari 2024 00:00:00 GMT+7)
+    startTime = 1704047400;  // Unix timestamp untuk 2024-01-01 00:00:00 GMT+7
     
     // Initialize Display
     setupDisplay();
@@ -149,10 +143,33 @@ void loop() {
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
         
-        // Hitung timestamp menggunakan baseTime + uptime (dalam detik)
-        unsigned long currentEpoch = baseTime + currentMillis / 1000;
-        char timestamp[20];
-        sprintf(timestamp, "%lu", currentEpoch);
+        // Hitung current timestamp dari NTP
+        unsigned long currentTimestamp = startTime + (currentMillis / 1000);
+        unsigned long dataTimestamp;
+        // Jika belum ada patokan, tulis baris patokan ke CSV
+        if (!baselineRecorded) {
+            dataTimestamp = currentTimestamp;  // gunakan nilai absolute sebagai patokan
+            if (!SD.exists(filename)) {
+                File headerFile = SD.open(filename, FILE_WRITE);
+                if (headerFile) {
+                    headerFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
+                    headerFile.close();
+                }
+            }
+            // Tulis data patokan (tidak dikirim, hanya lokal), bisa gunakan marker atau nilai asli
+            File baseFile = SD.open(filename, FILE_WRITE);
+            if (baseFile) {
+                baseFile.printf("%.2f;%.2f;%.2f;%.2f;%lu_baseline\n", 0.0, 0.0, 0.0, 0.0, currentTimestamp);
+                baseFile.close();
+            }
+            baselineTimestamp = currentTimestamp;
+            baselineRecorded = true;
+            // Untuk pembacaan pertama, selisih dianggap 0
+            dataTimestamp = 0;
+        } else {
+            // Hitung elapsed time sebagai selisih dari patokan
+            dataTimestamp = currentTimestamp - baselineTimestamp;
+        }
         
         // Read SHT31 sensor
         sht.read();
@@ -208,15 +225,15 @@ void loop() {
                 File writeFile = SD.open(filename, FILE_WRITE);
                 if (writeFile) {
                     writeFile.print(remainingData);
-                    writeFile.printf("%.2f;%.2f;%.2f;%.2f;%s\n",
-                                   temperature, humidity, r.V, r.F, timestamp);
+                    writeFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
+                                   temperature, humidity, r.V, r.F, dataTimestamp);
                     writeFile.close();
                 }
             } else {
                 File dataFile = SD.open(filename, FILE_WRITE);
                 if (dataFile) {
-                    dataFile.printf("%.2f;%.2f;%.2f;%.2f;%s\n",
-                                  temperature, humidity, r.V, r.F, timestamp);
+                    dataFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
+                                  temperature, humidity, r.V, r.F, dataTimestamp);
                     dataFile.close();
                 }
             }
@@ -228,7 +245,7 @@ void loop() {
                              String(humidity, 2) + "#" +
                              String(r.V, 2) + "#" +
                              String(r.F, 2) + "#" +
-                             String(timestamp);
+                             String(dataTimestamp);
             serial.println(datakirim);
             Serial.println("Data sent directly");
         }
@@ -313,83 +330,83 @@ void setupDisplay() {
     tft.fillScreen(TFT_BLACK);
 }
 
-void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
-                  bool modbusOK, bool wifiOK, bool sensorOK) {
-    tft.setFreeFont(&FreeSans9pt7b);
-    spr.setFreeFont(&FreeSans9pt7b);
-    tft.setTextSize(1);
+// void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
+//                   bool modbusOK, bool wifiOK, bool sensorOK) {
+//     tft.setFreeFont(&FreeSans9pt7b);
+//     spr.setFreeFont(&FreeSans9pt7b);
+//     tft.setTextSize(1);
 
-    // Status indicators
-    tft.setTextColor(wifiOK ? TFT_GREEN : TFT_RED);
-    tft.drawString("WiFi", 8, 5);
+//     // Status indicators
+//     tft.setTextColor(wifiOK ? TFT_GREEN : TFT_RED);
+//     tft.drawString("WiFi", 8, 5);
     
-    tft.setTextColor(modbusOK ? TFT_GREEN : TFT_RED);
-    tft.drawString("Modbus", 112, 5);
+//     tft.setTextColor(modbusOK ? TFT_GREEN : TFT_RED);
+//     tft.drawString("Modbus", 112, 5);
     
-    tft.setTextColor(sensorOK ? TFT_GREEN : TFT_RED);
-    tft.drawString("Sensor", 183, 5);
+//     tft.setTextColor(sensorOK ? TFT_GREEN : TFT_RED);
+//     tft.drawString("Sensor", 183, 5);
 
-    // Draw dividing lines
-    tft.drawFastVLine(160, 25, 220, TFT_DARKCYAN);
-    tft.drawFastHLine(0, 135, 320, TFT_DARKCYAN);
-    tft.drawFastHLine(0, 25, 320, TFT_DARKCYAN);
+//     // Draw dividing lines
+//     tft.drawFastVLine(160, 25, 220, TFT_DARKCYAN);
+//     tft.drawFastHLine(0, 135, 320, TFT_DARKCYAN);
+//     tft.drawFastHLine(0, 25, 320, TFT_DARKCYAN);
 
-    // Temperature (Quadrant 1)
-    spr.createSprite(158, 102);
-    spr.fillSprite(TFT_BLACK);
-    spr.setTextColor(TFT_WHITE);
-    spr.drawString("Temp", 55, 8);
-    spr.setTextColor(TFT_GREEN);
-    spr.setFreeFont(FSSO24);
-    spr.drawString(String(temperature, 1), 25, 36);
-    spr.setTextColor(TFT_YELLOW);
-    spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("C", 113, 85);
-    spr.pushSprite(0, 27);
-    spr.deleteSprite();
+//     // Temperature (Quadrant 1)
+//     spr.createSprite(158, 102);
+//     spr.fillSprite(TFT_BLACK);
+//     spr.setTextColor(TFT_WHITE);
+//     spr.drawString("Temp", 55, 8);
+//     spr.setTextColor(TFT_GREEN);
+//     spr.setFreeFont(FSSO24);
+//     spr.drawString(String(temperature, 1), 25, 36);
+//     spr.setTextColor(TFT_YELLOW);
+//     spr.setFreeFont(&FreeSans9pt7b);
+//     spr.drawString("C", 113, 85);
+//     spr.pushSprite(0, 27);
+//     spr.deleteSprite();
 
-    // Voltage (Quadrant 2)
-    spr.createSprite(158, 102);
-    spr.fillSprite(TFT_BLACK);
-    spr.setTextColor(TFT_WHITE);
-    spr.drawString("Voltage", 50, 8);
-    spr.setTextColor(TFT_GREEN);
-    spr.setFreeFont(FSSO24);
-    spr.drawString(String(voltage, 1), 11, 36);
-    spr.setTextColor(TFT_YELLOW);
-    spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("VAC", 105, 85);
-    spr.pushSprite(162, 27);
-    spr.deleteSprite();
+//     // Voltage (Quadrant 2)
+//     spr.createSprite(158, 102);
+//     spr.fillSprite(TFT_BLACK);
+//     spr.setTextColor(TFT_WHITE);
+//     spr.drawString("Voltage", 50, 8);
+//     spr.setTextColor(TFT_GREEN);
+//     spr.setFreeFont(FSSO24);
+//     spr.drawString(String(voltage, 1), 11, 36);
+//     spr.setTextColor(TFT_YELLOW);
+//     spr.setFreeFont(&FreeSans9pt7b);
+//     spr.drawString("VAC", 105, 85);
+//     spr.pushSprite(162, 27);
+//     spr.deleteSprite();
 
-    // Frequency (Quadrant 3)
-    spr.createSprite(158, 100);
-    spr.fillSprite(TFT_BLACK);
-    spr.setTextColor(TFT_WHITE);
-    spr.drawString("Freq", 62, 6);
-    spr.setTextColor(TFT_GREEN);
-    spr.setFreeFont(FSSO24);
-    spr.drawString(String(frequency, 1), 26, 34);
-    spr.setTextColor(TFT_YELLOW);
-    spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("Hz", 108, 82);
-    spr.pushSprite(162, 137);
-    spr.deleteSprite();
+//     // Frequency (Quadrant 3)
+//     spr.createSprite(158, 100);
+//     spr.fillSprite(TFT_BLACK);
+//     spr.setTextColor(TFT_WHITE);
+//     spr.drawString("Freq", 62, 6);
+//     spr.setTextColor(TFT_GREEN);
+//     spr.setFreeFont(FSSO24);
+//     spr.drawString(String(frequency, 1), 26, 34);
+//     spr.setTextColor(TFT_YELLOW);
+//     spr.setFreeFont(&FreeSans9pt7b);
+//     spr.drawString("Hz", 108, 82);
+//     spr.pushSprite(162, 137);
+//     spr.deleteSprite();
 
-    // Humidity (Quadrant 4)
-    spr.createSprite(158, 100);
-    spr.fillSprite(TFT_BLACK);
-    spr.setTextColor(TFT_WHITE);
-    spr.drawString("Humidity", 43, 6);
-    spr.setTextColor(TFT_GREEN);
-    spr.setFreeFont(FSSO24);
-    spr.drawString(String(humidity, 1), 25, 34);
-    spr.setTextColor(TFT_YELLOW);
-    spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("%RH", 65, 82);
-    spr.pushSprite(0, 137);
-    spr.deleteSprite();
-}
+//     // Humidity (Quadrant 4)
+//     spr.createSprite(158, 100);
+//     spr.fillSprite(TFT_BLACK);
+//     spr.setTextColor(TFT_WHITE);
+//     spr.drawString("Humidity", 43, 6);
+//     spr.setTextColor(TFT_GREEN);
+//     spr.setFreeFont(FSSO24);
+//     spr.drawString(String(humidity, 1), 25, 34);
+//     spr.setTextColor(TFT_YELLOW);
+//     spr.setFreeFont(&FreeSans9pt7b);
+//     spr.drawString("%RH", 65, 82);
+//     spr.pushSprite(0, 137);
+//     spr.deleteSprite();
+// }
 
 void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
