@@ -195,6 +195,9 @@ void loop() {
         // Hitung waktu relatif dari baseTime
         unsigned long timestamp = baseTime + (currentMillis / 1000);
         
+        // Simpan timestamp ke timeref untuk menjaga konsistensi waktu
+        saveTimestamp(timestamp);
+        
         // Read SHT31 sensor
         sht.read();
         float temperature = sht.getTemperature();
@@ -293,66 +296,70 @@ void loop() {
         }
     }
     
-    // Process backed up data when WiFi is available
+    // Process backed up data when WiFi is available - fixed
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
+        Serial.println("Checking backup data...");
         
-        File readFile = SD.open(filename);
-        if (readFile && readFile.available()) {
-            String header = readFile.readStringUntil('\n');
-            String remainingData = header + "\n";
-            bool dataSent = false;
-            
-            if (readFile.available()) {
-                String line = readFile.readStringUntil('\n');
-                if (line.length() > 0) {
-                    int semicolons = 0;
-                    for (unsigned int i = 0; i < line.length(); i++) {
-                        if (line[i] == ';') semicolons++;
-                    }
+        if (SD.exists(filename)) {
+            File readFile = SD.open(filename);
+            if (readFile && readFile.available()) {
+                String header = readFile.readStringUntil('\n');
+                String remainingData = header + "\n";
+                bool dataSent = false;
+                
+                // Baca dan kirim data baris pertama
+                if (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    line.trim();
                     
-                    if (semicolons == 4) {
+                    if (line.length() > 0) {
+                        Serial.println("Processing line: " + line);
+                        
                         int pos1 = line.indexOf(';');
                         int pos2 = line.indexOf(';', pos1 + 1);
                         int pos3 = line.indexOf(';', pos2 + 1);
                         int pos4 = line.indexOf(';', pos3 + 1);
                         
-                        String temp = line.substring(0, pos1);
-                        String hum = line.substring(pos1 + 1, pos2);
-                        String volt = line.substring(pos2 + 1, pos3);
-                        String freq = line.substring(pos3 + 1, pos4);
-                        String timestamp = line.substring(pos4 + 1);
-                        
-                        temp.trim(); hum.trim(); volt.trim(); freq.trim(); timestamp.trim();
-                        
-                        String datakirim = String("1#") + 
-                                         temp + "#" + 
-                                         hum + "#" + 
-                                         volt + "#" + 
-                                         freq + "#" + 
-                                         timestamp;
-                        
-                        serial.println(datakirim);
-                        dataSent = true;
+                        if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+                            String temp = line.substring(0, pos1);
+                            String hum = line.substring(pos1 + 1, pos2);
+                            String volt = line.substring(pos2 + 1, pos3);
+                            String freq = line.substring(pos3 + 1, pos4);
+                            String timestamp = line.substring(pos4 + 1);
+                            
+                            String datakirim = String("1#") + 
+                                             temp + "#" + 
+                                             hum + "#" + 
+                                             volt + "#" + 
+                                             freq + "#" + 
+                                             timestamp;
+                            
+                            serial.println(datakirim);
+                            Serial.println("Sent backup: " + datakirim);
+                            dataSent = true;
+                        }
                     }
                 }
-            }
-            
-            while (readFile.available()) {
-                remainingData += readFile.readStringUntil('\n');
-                if (readFile.available()) {
-                    remainingData += '\n';
+                
+                // Salin sisa data
+                while (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    if (line.length() > 0) {
+                        remainingData += line + "\n";
+                    }
                 }
-            }
-            
-            readFile.close();
-            
-            if (dataSent) {
-                SD.remove(filename);
-                File writeFile = SD.open(filename, FILE_WRITE);
-                if (writeFile) {
-                    writeFile.print(remainingData);
-                    writeFile.close();
+                readFile.close();
+                
+                // Update file jika data berhasil terkirim
+                if (dataSent) {
+                    SD.remove(filename);
+                    File writeFile = SD.open(filename, FILE_WRITE);
+                    if (writeFile) {
+                        writeFile.print(remainingData);
+                        writeFile.close();
+                        Serial.println("Backup file updated");
+                    }
                 }
             }
         }
