@@ -7,6 +7,8 @@
 #include "TFT_eSPI.h"
 #include "Free_Fonts.h"
 #include <RTClib.h>  // Add RTC library
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 // Display setup
 TFT_eSPI tft;
@@ -49,11 +51,18 @@ typedef struct {
 // Add RTC object
 RTC_DS3231 rtc;
 
+// Add NTP settings
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200); // UTC +7 offset (7*3600)
+unsigned long lastNTPSync = 0;
+const long NTP_SYNC_INTERVAL = 3600000; // Sync every hour
+
 // Function declarations
 void checkWiFiConnection();
 int countDataLines();
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, bool modbusOK, bool wifiOK, bool sensorOK);
 void setupDisplay();
+void syncTimeFromNTP();
 
 void setup() {
     // Initialize Serial communications
@@ -80,14 +89,24 @@ void setup() {
     // Initialize Display
     setupDisplay();
     
-    // Initialize RTC
+    // Initialize RTC with proper error checking and time setting
     if (!rtc.begin()) {
         Serial.println("RTC initialization failed!");
         return;
     }
     
-    // Uncomment this line to set the RTC time when needed
-    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // Initial NTP sync if WiFi is connected
+    if (WiFi.status() == WL_CONNECTED) {
+        syncTimeFromNTP();
+    }
+    
+    // Uncomment these lines on first upload to set the RTC time
+    // Comment them again after uploading once
+    if (rtc.lostPower()) {
+        Serial.println("RTC lost power, lets set the time!");
+        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        // rtc.adjust(DateTime(2024, 1, 21, 15, 30, 0)); // Or set manual time: YY,MM,DD,HH,MM,SS
+    }
     
     // Display initial WiFi scanning message
     tft.fillScreen(TFT_BLACK);
@@ -128,14 +147,20 @@ void loop() {
         checkWiFiConnection();
     }
     
+    // Add NTP sync check
+    if (wifiConnected && (currentMillis - lastNTPSync >= NTP_SYNC_INTERVAL)) {
+        lastNTPSync = currentMillis;
+        syncTimeFromNTP();
+    }
+    
     // Read sensors and update display
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
         
-        // Get current timestamp
+        // Get current timestamp - modified format
         DateTime now = rtc.now();
         char timestamp[20];
-        sprintf(timestamp, "%04d-%02d-%02d %02d:%02d:%02d",
+        sprintf(timestamp, "%04d%02d%02d%02d%02d%02d",
                 now.year(), now.month(), now.day(),
                 now.hour(), now.minute(), now.second());
         
@@ -410,4 +435,16 @@ int countDataLines() {
         readFile.close();
     }
     return lineCount;
+}
+
+void syncTimeFromNTP() {
+    if (wifiConnected) {
+        timeClient.begin();
+        if (timeClient.update()) {
+            time_t epochTime = timeClient.getEpochTime();
+            rtc.adjust(DateTime(epochTime));
+            Serial.println("RTC synced with NTP");
+        }
+        timeClient.end();
+    }
 }
