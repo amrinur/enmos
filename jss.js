@@ -19,18 +19,19 @@ const mqttClient = mqtt.connect('mqtt://broker.hivemq.com', {
 function saveDataToDatabase(frequency, humidity, temperature, voltage, timestamp) {
   const query = `
     INSERT INTO sensor_readings (frequency, humidity, temperature, voltage, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `;
-  dbConnection.query(query, [frequency, humidity, temperature, voltage, timestamp], (err, results) => {
+    VALUES (?, ?, ?, ?, ?)`; 
+  
+  // Swap the positions in the array to correct the order
+  dbConnection.query(query, [humidity, frequency, voltage, temperature, timestamp], (err, results) => {
     if (err) {
       console.error('Error saving data to MySQL:', err);
     } else {
-      console.log('✅ Data saved to MySQL:', {
+      console.log('Data saved to MySQL:', {
         id: results.insertId,
-        frequency,
-        humidity,
-        temperature,
-        voltage,
+        frequency: humidity,    // Swapped
+        humidity: frequency,    // Swapped
+        temperature: voltage,   // Swapped
+        voltage: temperature,   // Swapped
         created_at: timestamp,
       });
     }
@@ -46,9 +47,9 @@ mqttClient.on('connect', () => {
   topics.forEach((topic) => {
     mqttClient.subscribe(topic, (err) => {
       if (err) {
-        console.error(❌ Failed to subscribe to ${topic}:, err);
+        console.error('Failed to subscribe to ' + topic + ':', err);
       } else {
-        console.log(📡 Subscribed to ${topic} topic);
+        console.log('Subscribed to ' + topic + ' topic');
       }
     });
   });
@@ -67,15 +68,15 @@ mqttClient.on('message', (topic, message) => {
   
   if (topic === 'timestamp_data') {
     timestamp = value; // Simpan timestamp sebagai string dari Wio Terminal
-    console.log(🕒 Received timestamp: ${timestamp});
+    console.log('Received timestamp: ' + timestamp);
   } else {
     const numericValue = parseFloat(value);
     if (isNaN(numericValue)) {
-      console.error(❌ Received invalid data on topic ${topic}: ${message});
+      console.error('Received invalid data on topic ' + topic + ': ' + message);
       return;
     }
 
-    console.log(📥 Received message on topic ${topic}: ${numericValue});
+    console.log('Received message on topic ' + topic + ': ' + numericValue);
 
     // Simpan data berdasarkan topik
     switch (topic) {
@@ -92,7 +93,7 @@ mqttClient.on('message', (topic, message) => {
         humidity = numericValue;
         break;
       default:
-        console.error(❌ Unknown topic: ${topic});
+        console.error('Unknown topic: ' + topic);
     }
   }
 
@@ -111,10 +112,10 @@ mqttClient.on('message', (topic, message) => {
 
 // Menangani error koneksi MQTT
 mqttClient.on('error', (err) => {
-  console.error('❌ MQTT Connection Error:', err);
+  console.error('MQTT Connection Error:', err);
 });
 
 // Menangani error koneksi database MySQL
 dbConnection.on('error', (err) => {
-  console.error('❌ MySQL Connection Error:', err);
+  console.error('MySQL Connection Error:', err);
 });
