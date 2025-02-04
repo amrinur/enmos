@@ -385,76 +385,83 @@ void loop() {
         Serial.println("Processing backup data...");
         
         if (SD.exists(filename)) {
-            // First count lines to determine array size
             int totalLines = countDataLines();
             if (totalLines > 0) {
                 Serial.println("Found " + String(totalLines) + " lines to process");
                 
-                // Create array to store lines
-                String* dataLines = new String[totalLines];
-                int lineIndex = 0;
-                
-                // Read all lines into array
                 File readFile = SD.open(filename);
                 if (readFile) {
                     // Skip header
                     readFile.readStringUntil('\n');
                     
-                    // Read data lines
-                    while (readFile.available() && lineIndex < totalLines) {
+                    // Process one line at a time
+                    int processedLines = 0;
+                    while (readFile.available() && processedLines < totalLines) {
                         String line = readFile.readStringUntil('\n');
-                        line.trim();
                         if (line.length() > 0) {
-                            dataLines[lineIndex] = line;
-                            lineIndex++;
+                            // Remove any \r or whitespace
+                            line.trim();
+                            
+                            // Parse the line
+                            char tempStr[10], humStr[10], voltStr[10], freqStr[10], timeStr[15];
+                            float temp, hum, volt, freq;
+                            unsigned long timestamp;
+                            
+                            int pos1 = line.indexOf(';');
+                            int pos2 = line.indexOf(';', pos1 + 1);
+                            int pos3 = line.indexOf(';', pos2 + 1);
+                            int pos4 = line.indexOf(';', pos3 + 1);
+                            
+                            if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+                                // Extract values and convert to proper types
+                                line.substring(0, pos1).toCharArray(tempStr, 10);
+                                line.substring(pos1 + 1, pos2).toCharArray(humStr, 10);
+                                line.substring(pos2 + 1, pos3).toCharArray(voltStr, 10);
+                                line.substring(pos3 + 1, pos4).toCharArray(freqStr, 10);
+                                line.substring(pos4 + 1).toCharArray(timeStr, 15);
+                                
+                                temp = atof(tempStr);
+                                hum = atof(humStr);
+                                volt = atof(voltStr);
+                                freq = atof(freqStr);
+                                timestamp = atol(timeStr);
+                                
+                                // Create data string using fixed buffers
+                                char datakirim[100];
+                                snprintf(datakirim, sizeof(datakirim), 
+                                       "1#%.2f#%.2f#%.2f#%.2f#%lu",
+                                       temp, hum, volt, freq, timestamp);
+                                
+                                delay(1000);
+                                serial.println(datakirim);
+                                serial.flush();
+                                delay(5000);
+                                
+                                Serial.print("Sent backup [");
+                                Serial.print(processedLines + 1);
+                                Serial.print("/");
+                                Serial.print(totalLines);
+                                Serial.print("]: ");
+                                Serial.println(datakirim);
+                                
+                                delay(4000);
+                                processedLines++;
+                            }
                         }
                     }
                     readFile.close();
                     
-                    // Process each line in array with increased delays
-                    for (int i = 0; i < lineIndex; i++) {
-                        String line = dataLines[i];
-                        int pos1 = line.indexOf(';');
-                        int pos2 = line.indexOf(';', pos1 + 1);
-                        int pos3 = line.indexOf(';', pos2 + 1);
-                        int pos4 = line.indexOf(';', pos3 + 1);
-                        
-                        if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
-                            String temp = line.substring(0, pos1);
-                            String hum = line.substring(pos1 + 1, pos2);
-                            String volt = line.substring(pos2 + 1, pos3);
-                            String freq = line.substring(pos3 + 1, pos4);
-                            String timestamp = line.substring(pos4 + 1);
-                            
-                            String datakirim = String("1#") + 
-                                             temp.trim() + "#" + 
-                                             hum.trim() + "#" + 
-                                             volt.trim() + "#" + 
-                                             freq.trim() + "#" + 
-                                             timestamp.trim();
-                            
-                            delay(1000); // Pre-transmission delay
-                            serial.println(datakirim);
-                            serial.flush();
-                            delay(5000); // Post-transmission delay
-                            
-                            Serial.println("Sent backup [" + String(i+1) + "/" + String(lineIndex) + "]: " + datakirim);
-                            delay(4000); // Additional delay between transmissions
+                    // Clear file if we processed any lines
+                    if (processedLines > 0) {
+                        SD.remove(filename);
+                        File writeFile = SD.open(filename, FILE_WRITE);
+                        if (writeFile) {
+                            writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
+                            writeFile.close();
+                            Serial.println("Backup file cleared after sending " + String(processedLines) + " records");
                         }
                     }
-                    
-                    // Clear file and write header
-                    SD.remove(filename);
-                    File writeFile = SD.open(filename, FILE_WRITE);
-                    if (writeFile) {
-                        writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
-                        writeFile.close();
-                        Serial.println("Backup file cleared after sending " + String(lineIndex) + " records");
-                    }
                 }
-                
-                // Clean up
-                delete[] dataLines;
             }
         }
     }
