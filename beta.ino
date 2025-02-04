@@ -181,29 +181,28 @@ void loop() {
         Serial.println("Display off");
     }
 
-    // Pembacaan sensor dan update display setiap 1 detik
+    // Update display setiap 1 detik
     static unsigned long lastDisplayUpdate = 0;
     if (currentMillis - lastDisplayUpdate >= 1000) {
         lastDisplayUpdate = currentMillis;
         
-        // Baca sensor dan modbus untuk display
+        // Baca sensor untuk display
         sht.read();
-        float t = sht.getTemperature();
-        float h = sht.getHumidity();
+        float temperature = sht.getTemperature();
+        float humidity = sht.getHumidity();
         
-        READING r;
+        // Baca Modbus untuk display
         uint8_t result = node.readHoldingRegisters(0002, 10);
+        float voltage = 0, frequency = 0;
+        
         if (result == node.ku8MBSuccess) {
-            r.V = (float)node.getResponseBuffer(0x00) / 100;
-            r.F = (float)node.getResponseBuffer(0x09) / 100;
+            voltage = (float)node.getResponseBuffer(0x00) / 100;
+            frequency = (float)node.getResponseBuffer(0x09) / 100;
             tft.setTextColor(TFT_GREEN);
-            tft.drawString("Modbus", 112, 5);
         } else {
-            r.V = 0;
-            r.F = 0;
             tft.setTextColor(TFT_RED);
-            tft.drawString("Modbus", 112, 5);
         }
+        tft.drawString("Modbus", 112, 5);
 
         // Update display status dan garis
         tft.setFreeFont(&FreeSans9pt7b);
@@ -211,19 +210,11 @@ void loop() {
         tft.setTextSize(1);
 
         // Status WiFi
-        if (WiFi.status() == WL_CONNECTED) {
-            tft.setTextColor(TFT_GREEN);
-        } else {
-            tft.setTextColor(TFT_RED);
-        }
+        tft.setTextColor(WiFi.status() == WL_CONNECTED ? TFT_GREEN : TFT_RED);
         tft.drawString("WiFi", 8, 5);
 
         // Status Sensor
-        if (h == 0) {
-            tft.setTextColor(TFT_RED);
-        } else {
-            tft.setTextColor(TFT_GREEN);
-        }
+        tft.setTextColor(humidity == 0 ? TFT_RED : TFT_GREEN);
         tft.drawString("Sensor", 183, 5);
 
         // Draw dividing lines
@@ -232,10 +223,10 @@ void loop() {
         tft.drawFastHLine(0, 25, 320, TFT_DARKCYAN);
 
         // Update quadrants
-        updateQuadrant1(t);     // Temperature
-        updateQuadrant2(r.V);   // Voltage
-        updateQuadrant3(r.F);   // Frequency
-        updateQuadrant4(h);     // Humidity
+        updateQuadrant1(temperature);
+        updateQuadrant2(voltage);
+        updateQuadrant3(frequency);
+        updateQuadrant4(humidity);
     }
 
     // Proses penyimpanan dan pengiriman data
