@@ -1,9 +1,13 @@
 #include "Wire.h"
 #include "TFT_eSPI.h"
 #include "SHT31.h"
+#include "rpcWiFi.h"
 #include <SPI.h>
 #include <ModbusMaster.h>
 #include "Free_Fonts.h"
+
+const char* ssid = "lime";
+const char* password =  "00000000";
 
 typedef struct {
   float V;
@@ -24,11 +28,18 @@ void setup() {
   Serial.begin(115200);
   SerialMod.begin(9600);
   
+  pinMode(WIO_5S_PRESS, INPUT_PULLUP);
+
   node.begin(17, SerialMod);
   Wire.begin();
   sht.begin();    //SHT31 I2C Address
   
   Wire.setClock(100000);
+  
+  // WiFi initialization
+  WiFi.mode(WIFI_OFF);
+  WiFi.disconnect();
+  delay(100);
   
   tft.begin();
   tft.init();
@@ -37,6 +48,25 @@ void setup() {
   spr.setRotation(3);
   
   tft.fillScreen(TFT_BLACK);
+  tft.setFreeFont(&FreeSansOblique12pt7b);
+  tft.println(" ");
+  tft.drawString("Scanning Network!",8,5);
+  delay(1000);
+  
+  // Scan networks
+  int n = WiFi.scanNetworks();
+  int i = 0;
+  tft.fillScreen(TFT_BLACK);
+  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setCursor(87,22);
+  tft.print(n);
+  tft.println(" networks found");
+  do {
+    i++;
+    tft.println(String (i)+ ". " + String(WiFi.SSID(i)) + String (WiFi.RSSI(i)));
+  } while (i != n);
+  
+  WiFi.begin(ssid, password);
   digitalWrite(LCD_BACKLIGHT, HIGH);
 }
 
@@ -132,6 +162,21 @@ void loop() {
   } else {
     tft.setTextColor(TFT_GREEN);
     tft.drawString("Sensor",183,5);
+  }
+
+  // WiFi status indicator
+  if (WiFi.status() != WL_CONNECTED) { 
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSans9pt7b);
+    tft.setTextColor(TFT_RED);
+    tft.drawString("WiFi",8,5);
+    WiFi.begin(ssid, password);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSans9pt7b);
+    tft.setTextColor(TFT_GREEN);
+    tft.drawString("WiFi",8,5);
   }
 
   delay(1000);  // Basic refresh rate
