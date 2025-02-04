@@ -181,6 +181,33 @@ void loop() {
         digitalWrite(LCD_BACKLIGHT, LOW);
         Serial.println("Display off");
     }
+
+    // Tambahkan update display setiap 1 detik
+    static unsigned long lastDisplayUpdate = 0;
+    if (currentMillis - lastDisplayUpdate >= 1000) {  // Update setiap 1 detik
+        lastDisplayUpdate = currentMillis;
+        
+        // Baca sensor untuk display
+        sht.read();
+        float temperature = sht.getTemperature();
+        float humidity = sht.getHumidity();
+        
+        // Baca Modbus
+        READING r;
+        uint8_t result = node.readHoldingRegisters(0002, 10);
+        if (result == node.ku8MBSuccess) {
+            r.V = (float)node.getResponseBuffer(0x00) / 100;
+            r.F = (float)node.getResponseBuffer(0x09) / 100;
+        } else {
+            r.V = 0;
+            r.F = 0;
+        }
+        
+        // Update display
+        bool modbusOK = (result == node.ku8MBSuccess);
+        bool sensorOK = (humidity != 0);
+        updateDisplay(temperature, humidity, r.V, r.F, modbusOK, wifiConnected, sensorOK);
+    }
     
     // Check WiFi connection
     if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
@@ -296,7 +323,7 @@ void loop() {
         }
     }
     
-    // Process backed up data when WiFi is available - fixed
+    // Process backed up data when WiFi is available
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
         Serial.println("Checking backup data...");
@@ -305,14 +332,13 @@ void loop() {
             File readFile = SD.open(filename);
             if (readFile && readFile.available()) {
                 String header = readFile.readStringUntil('\n');
-                String remainingData = "";
-                remainingData += header;
-                remainingData += "\n";
-                bool dataSent = false;
+                String remainingData = header + "\n";
+                bool anyDataSent = false;
                 
-                if (readFile.available()) {
+                // Proses semua baris data
+                while (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    line.trim();  // Remove any whitespace/newline
+                    line.trim();
                     
                     if (line.length() > 0) {
                         Serial.println("Processing line: " + line);
@@ -329,13 +355,6 @@ void loop() {
                             String freq = line.substring(pos3 + 1, pos4);
                             String timestamp = line.substring(pos4 + 1);
                             
-                            // Clean up the strings
-                            temp.trim(); 
-                            hum.trim(); 
-                            volt.trim(); 
-                            freq.trim(); 
-                            timestamp.trim();
-                            
                             String datakirim = String("1#") + 
                                              temp + "#" + 
                                              hum + "#" + 
@@ -345,28 +364,23 @@ void loop() {
                             
                             serial.println(datakirim);
                             Serial.println("Sent backup: " + datakirim);
-                            dataSent = true;
+                            anyDataSent = true;
+                            
+                            // Tambah delay kecil untuk memastikan data terkirim
+                            delay(100);
                         }
-                    }
-                }
-                
-                // Copy remaining lines
-                while (readFile.available()) {
-                    String line = readFile.readStringUntil('\n');
-                    if (line.length() > 0) {
-                        remainingData += line;
-                        remainingData += "\n";
                     }
                 }
                 readFile.close();
                 
-                if (dataSent) {
+                // Hapus file backup jika semua data telah terkirim
+                if (anyDataSent) {
                     SD.remove(filename);
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
-                        writeFile.print(remainingData);
+                        writeFile.println(header);
                         writeFile.close();
-                        Serial.println("Backup file updated");
+                        Serial.println("Backup file cleared, header restored");
                     }
                 }
             }
