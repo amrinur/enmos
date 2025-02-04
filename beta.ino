@@ -379,7 +379,7 @@ void loop() {
         }
     }
     
-    // Process backed up data when WiFi is available - send all data
+       // Process backed up data when WiFi is available - fixed
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
         Serial.println("Checking backup data...");
@@ -388,13 +388,14 @@ void loop() {
             File readFile = SD.open(filename);
             if (readFile && readFile.available()) {
                 String header = readFile.readStringUntil('\n');
-                String remainingData = header + "\n";
-                int linesProcessed = 0;
+                String remainingData = "";
+                remainingData += header;
+                remainingData += "\n";
+                bool dataSent = false;
                 
-                // Process all available lines
-                while (readFile.available()) {
+                if (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    line.trim();
+                    line.trim();  // Remove any whitespace/newline
                     
                     if (line.length() > 0) {
                         Serial.println("Processing line: " + line);
@@ -411,31 +412,44 @@ void loop() {
                             String freq = line.substring(pos3 + 1, pos4);
                             String timestamp = line.substring(pos4 + 1);
                             
+                            // Clean up the strings
+                            temp.trim(); 
+                            hum.trim(); 
+                            volt.trim(); 
+                            freq.trim(); 
+                            timestamp.trim();
+                            
                             String datakirim = String("1#") + 
-                                             temp.trim() + "#" + 
-                                             hum.trim() + "#" + 
-                                             volt.trim() + "#" + 
-                                             freq.trim() + "#" + 
-                                             timestamp.trim();
+                                             temp + "#" + 
+                                             hum + "#" + 
+                                             volt + "#" + 
+                                             freq + "#" + 
+                                             timestamp;
                             
                             serial.println(datakirim);
-                            delay(200); // Small delay between transmissions
-                            linesProcessed++;
                             Serial.println("Sent backup: " + datakirim);
+                            dataSent = true;
                         }
                     }
                 }
                 
+                // Copy remaining lines
+                while (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    if (line.length() > 0) {
+                        remainingData += line;
+                        remainingData += "\n";
+                    }
+                }
                 readFile.close();
                 
-                // If we processed any lines, clear the file
-                if (linesProcessed > 0) {
+                if (dataSent) {
                     SD.remove(filename);
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
-                        writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
+                        writeFile.print(remainingData);
                         writeFile.close();
-                        Serial.println("Backup file cleared - Processed " + String(linesProcessed) + " lines");
+                        Serial.println("Backup file updated");
                     }
                 }
             }
