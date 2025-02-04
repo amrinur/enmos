@@ -305,14 +305,14 @@ void loop() {
             File readFile = SD.open(filename);
             if (readFile && readFile.available()) {
                 String header = readFile.readStringUntil('\n');
-                String remainingData = header + "\n";
+                String remainingData = "";
+                remainingData += header;
+                remainingData += "\n";
                 bool dataSent = false;
                 
-                // Baca dan kirim data baris pertama
                 if (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    // Bersihkan line dari karakter newline dan whitespace
-                    line.trim();
+                    line.trim();  // Remove any whitespace/newline
                     
                     if (line.length() > 0) {
                         Serial.println("Processing line: " + line);
@@ -323,16 +323,18 @@ void loop() {
                         int pos4 = line.indexOf(';', pos3 + 1);
                         
                         if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
-                            // Tambahan trim untuk setiap bagian data
-                            String temp = line.substring(0, pos1).trim();
-                            String hum = line.substring(pos1 + 1, pos2).trim();
-                            String volt = line.substring(pos2 + 1, pos3).trim();
-                            String freq = line.substring(pos3 + 1, pos4).trim();
-                            String timestamp = line.substring(pos4 + 1).trim();
+                            String temp = line.substring(0, pos1);
+                            String hum = line.substring(pos1 + 1, pos2);
+                            String volt = line.substring(pos2 + 1, pos3);
+                            String freq = line.substring(pos3 + 1, pos4);
+                            String timestamp = line.substring(pos4 + 1);
                             
-                            // Pastikan tidak ada karakter newline dalam timestamp
-                            timestamp.replace("\n", "");
-                            timestamp.replace("\r", "");
+                            // Clean up the strings
+                            temp.trim(); 
+                            hum.trim(); 
+                            volt.trim(); 
+                            freq.trim(); 
+                            timestamp.trim();
                             
                             String datakirim = String("1#") + 
                                              temp + "#" + 
@@ -348,16 +350,16 @@ void loop() {
                     }
                 }
                 
-                // Salin sisa data
+                // Copy remaining lines
                 while (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
                     if (line.length() > 0) {
-                        remainingData += line + "\n";
+                        remainingData += line;
+                        remainingData += "\n";
                     }
                 }
                 readFile.close();
                 
-                // Update file jika data berhasil terkirim
                 if (dataSent) {
                     SD.remove(filename);
                     File writeFile = SD.open(filename, FILE_WRITE);
