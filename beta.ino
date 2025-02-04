@@ -8,7 +8,6 @@
 #include "Free_Fonts.h"
 #include <WiFiUdp.h>
 #include <NTPClient.h>
-#include <esp_task_wdt.h>
 
 // Display setup
 TFT_eSPI tft;
@@ -27,8 +26,6 @@ const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
 const long WIFI_CHECK_INTERVAL = 10000;
-const int WIFI_RETRY_DELAY = 5000;  // 5 seconds delay between WiFi retries
-const int MAX_WIFI_ATTEMPTS = 20;   // Maximum WiFi connection attempts
 
 // File and timing
 char filename[25] = "/tth.csv";
@@ -135,8 +132,6 @@ void setup() {
     
     // Initialize WiFi
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.persistent(true);
     WiFi.begin(ssid, password);
     
     // Display WiFi scanning message
@@ -184,9 +179,6 @@ void setup() {
     } else {
         baseTime = getStoredTimestamp();
     }
-
-    esp_task_wdt_init(WDT_TIMEOUT, true);  // Enable watchdog timer
-    esp_task_wdt_add(NULL);  // Add current thread to WDT watch
 }
 
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
@@ -388,105 +380,73 @@ void loop() {
     }
     
     // Process backed up data when WiFi is available
+     // Process backed up data when WiFi is available
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
         
-        // Check WiFi signal strength before attempting transmission
-        if (WiFi.RSSI() > -90) {  // Only proceed if signal is reasonable
-            Serial.println("Processing backup data...");
-            Serial.print("Current RSSI: ");
-            Serial.println(WiFi.RSSI());
+        File readFile = SD.open(filename);
+        if (readFile && readFile.available()) {
+            String header = readFile.readStringUntil('\n');
+            String remainingData = header + "\n";
+            bool dataSent = false;
             
-            if (SD.exists(filename)) {
-                int totalLines = countDataLines();
-                if (totalLines > 0) {
-                    Serial.println("Found " + String(totalLines) + " lines to process");
+            if (readFile.available()) {
+                String line = readFile.readStringUntil('\n');
+                if (line.length() > 0) {
+                    int semicolons = 0;
+                    for (unsigned int i = 0; i < line.length(); i++) {
+                        if (line[i] == ';') semicolons++;
+                    }
                     
-                    File readFile = SD.open(filename);
-                    if (readFile) {
-                        // Skip header
-                        readFile.readStringUntil('\n');
+                    if (semicolons == 4) {
+                        int pos1 = line.indexOf(';');
+                        int pos2 = line.indexOf(';', pos1 + 1);
+                        int pos3 = line.indexOf(';', pos2 + 1);
+                        int pos4 = line.indexOf(';', pos3 + 1);
                         
-                        // Process one line at a time
-                        int processedLines = 0;
-                        while (readFile.available() && processedLines < totalLines) {
-                            String line = readFile.readStringUntil('\n');
-                            if (line.length() > 0) {
-                                // Remove any \r or whitespace
-                                line.trim();
-                                
-                                // Parse the line
-                                char tempStr[10], humStr[10], voltStr[10], freqStr[10], timeStr[15];
-                                float temp, hum, volt, freq;
-                                unsigned long timestamp;
-                                
-                                int pos1 = line.indexOf(';');
-                                int pos2 = line.indexOf(';', pos1 + 1);
-                                int pos3 = line.indexOf(';', pos2 + 1);
-                                int pos4 = line.indexOf(';', pos3 + 1);
-                                
-                                if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
-                                    // Extract values and convert to proper types
-                                    line.substring(0, pos1).toCharArray(tempStr, 10);
-                                    line.substring(pos1 + 1, pos2).toCharArray(humStr, 10);
-                                    line.substring(pos2 + 1, pos3).toCharArray(voltStr, 10);
-                                    line.substring(pos3 + 1, pos4).toCharArray(freqStr, 10);
-                                    line.substring(pos4 + 1).toCharArray(timeStr, 15);
-                                    
-                                    temp = atof(tempStr);
-                                    hum = atof(humStr);
-                                    volt = atof(voltStr);
-                                    freq = atof(freqStr);
-                                    timestamp = atol(timeStr);
-                                    
-                                    // Create data string using fixed buffers
-                                    char datakirim[100];
-                                    snprintf(datakirim, sizeof(datakirim), 
-                                           "1#%.2f#%.2f#%.2f#%.2f#%lu",
-                                           temp, hum, volt, freq, timestamp);
-                                    
-                                    delay(1000);
-                                    serial.println(datakirim);
-                                    serial.flush();
-                                    delay(5000);
-                                    esp_task_wdt_reset();
-                                    
-                                    Serial.print("Sent backup [");
-                                    Serial.print(processedLines + 1);
-                                    Serial.print("/");
-                                    Serial.print(totalLines);
-                                    Serial.print("]: ");
-                                    Serial.println(datakirim);
-                                    
-                                    delay(4000);
-                                    processedLines++;
-                                    
-                                    // Verify connection after sending
-                                    if (WiFi.status() != WL_CONNECTED) {
-                                        Serial.println("Connection lost after transmission");
-                                        checkWiFiConnection();
-                                    }
-                                }
-                            }
-                        }
-                        readFile.close();
+                        String temp = line.substring(0, pos1);
+                        String hum = line.substring(pos1 + 1, pos2);
+                        String volt = line.substring(pos2 + 1, pos3);
+                        String freq = line.substring(pos3 + 1, pos4);
+                        String timestamp = line.substring(pos4 + 1);
                         
-                        // Clear file if we processed any lines
-                        if (processedLines > 0) {
-                            SD.remove(filename);
-                            File writeFile = SD.open(filename, FILE_WRITE);
-                            if (writeFile) {
-                                writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
-                                writeFile.close();
-                                Serial.println("Backup file cleared after sending " + String(processedLines) + " records");
-                            }
-                        }
+                            // Clean values
+                            temp.trim();
+                            hum.trim();
+                            volt.trim();
+                            freq.trim();
+                            timestamp.trim();
+                            
+                            String datakirim = String("1#") + 
+                                             temp + "#" + 
+                                             hum + "#" + 
+                                             volt + "#" + 
+                                             freq + "#" + 
+                                             timestamp;
+                        
+                        serial.println(datakirim);
+                        dataSent = true;
                     }
                 }
             }
-        } else {
-            Serial.println("WiFi signal too weak for transmission");
-            delay(5000);
+            
+            while (readFile.available()) {
+                remainingData += readFile.readStringUntil('\n');
+                if (readFile.available()) {
+                    remainingData += '\n';
+                }
+            }
+            
+            readFile.close();
+            
+            if (dataSent) {
+                SD.remove(filename);
+                File writeFile = SD.open(filename, FILE_WRITE);
+                if (writeFile) {
+                    writeFile.print(remainingData);
+                    writeFile.close();
+                }
+            }
         }
     }
 }
@@ -495,33 +455,21 @@ void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
         wifiConnected = false;
         Serial.println("WiFi disconnected");
-        
-        // More robust reconnection attempt
-        WiFi.disconnect(true);
-        delay(1000);
-        WiFi.mode(WIFI_STA);
-        WiFi.setAutoReconnect(true);
+        WiFi.disconnect();
         WiFi.begin(ssid, password);
         
         int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < MAX_WIFI_ATTEMPTS) {
-            delay(WIFI_RETRY_DELAY);
-            Serial.print(".");
+        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+            delay(500);
             attempts++;
-            esp_task_wdt_reset();  // Reset watchdog timer
         }
         
         if (WiFi.status() == WL_CONNECTED) {
             wifiConnected = true;
             Serial.println("WiFi reconnected");
-            Serial.print("IP: ");
-            Serial.println(WiFi.localIP());
-            Serial.print("RSSI: ");
-            Serial.println(WiFi.RSSI());
         }
     } else {
         wifiConnected = true;
-        esp_task_wdt_reset();  // Reset watchdog timer
     }
 }
 
