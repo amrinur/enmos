@@ -25,13 +25,13 @@ const char* ssid = "lime";
 const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 10000;
+const long WIFI_CHECK_INTERVAL = 7000;
 
 // File and timing
 char filename[25] = "/tth.csv";
 unsigned long previousMillis = 0;
 unsigned long previousMillisSensor = 0;
-const long INTERVAL = 15000;        // Interval kirim data SD
+const long INTERVAL = 11000;        // Interval kirim data SD
 const long SENSOR_INTERVAL = 40000; // Interval baca sensor
 
 // Display timing
@@ -380,7 +380,6 @@ void loop() {
     }
     
     // Process backed up data when WiFi is available
-     // Process backed up data when WiFi is available
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
         
@@ -390,7 +389,8 @@ void loop() {
             String remainingData = header + "\n";
             bool dataSent = false;
             
-            if (readFile.available()) {
+            // Read and send all data lines
+            while (readFile.available()) {
                 String line = readFile.readStringUntil('\n');
                 if (line.length() > 0) {
                     int semicolons = 0;
@@ -410,40 +410,35 @@ void loop() {
                         String freq = line.substring(pos3 + 1, pos4);
                         String timestamp = line.substring(pos4 + 1);
                         
-                            // Clean values
-                            temp.trim();
-                            hum.trim();
-                            volt.trim();
-                            freq.trim();
-                            timestamp.trim();
-                            
-                            String datakirim = String("1#") + 
-                                             temp + "#" + 
-                                             hum + "#" + 
-                                             volt + "#" + 
-                                             freq + "#" + 
-                                             timestamp;
+                        // Clean values
+                        temp.trim();
+                        hum.trim();
+                        volt.trim();
+                        freq.trim();
+                        timestamp.trim();
                         
+                        String datakirim = String("1#") + 
+                                         temp + "#" + 
+                                         hum + "#" + 
+                                         volt + "#" + 
+                                         freq + "#" + 
+                                         timestamp;
+                    
                         serial.println(datakirim);
                         dataSent = true;
+                        delay(100); // Delay kecil antara pengiriman untuk stabilitas
                     }
-                }
-            }
-            
-            while (readFile.available()) {
-                remainingData += readFile.readStringUntil('\n');
-                if (readFile.available()) {
-                    remainingData += '\n';
                 }
             }
             
             readFile.close();
             
+            // Jika ada data yang terkirim, hapus file dan buat yang baru dengan header
             if (dataSent) {
                 SD.remove(filename);
                 File writeFile = SD.open(filename, FILE_WRITE);
                 if (writeFile) {
-                    writeFile.print(remainingData);
+                    writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
                     writeFile.close();
                 }
             }
