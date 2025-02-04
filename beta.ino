@@ -311,6 +311,7 @@ void loop() {
                 // Baca dan kirim data baris pertama
                 if (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
+                    // Bersihkan line dari karakter newline dan whitespace
                     line.trim();
                     
                     if (line.length() > 0) {
@@ -322,11 +323,16 @@ void loop() {
                         int pos4 = line.indexOf(';', pos3 + 1);
                         
                         if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
-                            String temp = line.substring(0, pos1);
-                            String hum = line.substring(pos1 + 1, pos2);
-                            String volt = line.substring(pos2 + 1, pos3);
-                            String freq = line.substring(pos3 + 1, pos4);
-                            String timestamp = line.substring(pos4 + 1);
+                            // Tambahan trim untuk setiap bagian data
+                            String temp = line.substring(0, pos1).trim();
+                            String hum = line.substring(pos1 + 1, pos2).trim();
+                            String volt = line.substring(pos2 + 1, pos3).trim();
+                            String freq = line.substring(pos3 + 1, pos4).trim();
+                            String timestamp = line.substring(pos4 + 1).trim();
+                            
+                            // Pastikan tidak ada karakter newline dalam timestamp
+                            timestamp.replace("\n", "");
+                            timestamp.replace("\r", "");
                             
                             String datakirim = String("1#") + 
                                              temp + "#" + 
