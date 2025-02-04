@@ -49,10 +49,6 @@ const char* timeRefFile = "/timref.csv";
 TFT_eSPI tft;
 TFT_eSprite spr = TFT_eSprite(&tft);
 #define LCD_BACKLIGHT (72Ul)
-#define WIO_5S_PRESS PIN_BUTTON_3  // Tombol untuk display
-const long BACKLIGHT_TIMEOUT = 180000; // 3 menit timeout
-unsigned long lastBacklightTime = 0;
-bool displayOn = true;
 
 // Function declarations
 void checkWiFiConnection();
@@ -144,19 +140,12 @@ void setup() {
     }
 
     // Add display initialization
-    pinMode(WIO_5S_PRESS, INPUT_PULLUP);
-    pinMode(LCD_BACKLIGHT, OUTPUT);
-    
     tft.begin();
     tft.init();
     tft.setRotation(3);
     spr.createSprite(TFT_HEIGHT, TFT_WIDTH);
     spr.setRotation(3);
-    
-    // Turn on backlight
     digitalWrite(LCD_BACKLIGHT, HIGH);
-    displayOn = true;
-    lastBacklightTime = millis();
     
     // Clear and setup initial display
     tft.fillScreen(TFT_BLACK);
@@ -186,208 +175,181 @@ void setup() {
 void loop() {
     unsigned long currentMillis = millis();
     
-    // Handle display backlight control
-    if (digitalRead(WIO_5S_PRESS) == LOW) {
-        displayOn = true;
-        digitalWrite(LCD_BACKLIGHT, HIGH);
-        lastBacklightTime = currentMillis;
-        delay(100); // Debounce
+    // Check WiFi connection
+    if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
+        previousWiFiCheck = currentMillis;
+        checkWiFiConnection();
     }
     
-    // Auto turn off display after timeout
-    if (displayOn && (currentMillis - lastBacklightTime > BACKLIGHT_TIMEOUT)) {
-        displayOn = false;
-        digitalWrite(LCD_BACKLIGHT, LOW);
-    }
-
-    // Only update display if it's on
-    if (displayOn) {
-        // Check WiFi connection
-        if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
-            previousWiFiCheck = currentMillis;
-            checkWiFiConnection();
-        }
+    // Read sensors
+    if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
+        previousMillisSensor = currentMillis;
         
-        // Read sensors
-        if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
-            previousMillisSensor = currentMillis;
+        unsigned long timestamp = baseTime + (currentMillis / 1000);
+        saveTimestamp(timestamp);
+        
+        // Read SHT31 sensor
+        sht.read();
+        float temperature = sht.getTemperature();
+        float humidity = sht.getHumidity();
+        
+        // Read Modbus
+        READING r;
+        uint8_t result = node.readHoldingRegisters(0002, 10);
+        if (result == node.ku8MBSuccess) {
+            r.V = (float)node.getResponseBuffer(0x00) / 100;
+            r.F = (float)node.getResponseBuffer(0x09) / 100;
+        } else {
+            r.V = 0;
+            r.F = 0;
+        }
+
+        // Sederhanakan update display mengikuti pola heriori.ino
+        tft.setFreeFont(&FreeSans9pt7b);
+        
+        // Status bar sederhana
+        tft.setTextColor(WiFi.status() == WL_CONNECTED ? TFT_GREEN : TFT_RED);
+        tft.drawString("WiFi", 8, 5);
+        tft.setTextColor(result == node.ku8MBSuccess ? TFT_GREEN : TFT_RED);
+        tft.drawString("Modbus", 112, 5);
+        tft.setTextColor(humidity != 0 ? TFT_GREEN : TFT_RED);
+        tft.drawString("Sensor", 183, 5);
+
+        // Layout
+        tft.drawFastVLine(160, 25, 220, TFT_DARKCYAN);
+        tft.drawFastHLine(0, 135, 320, TFT_DARKCYAN);
+        tft.drawFastHLine(0, 25, 320, TFT_DARKCYAN);
+
+        // Temperature (Kuadran 1)
+        spr.createSprite(158, 102);
+        spr.fillSprite(TFT_BLACK);
+        spr.setTextColor(TFT_WHITE);
+        spr.drawString("Temp", 55, 8);
+        spr.setTextColor(TFT_GREEN);
+        spr.setFreeFont(FSSO24);
+        spr.drawString(String(temperature, 1), 25, 36);
+        spr.setTextColor(TFT_YELLOW);
+        spr.setFreeFont(&FreeSans9pt7b);
+        spr.drawString("C", 113, 85);
+        spr.pushSprite(0, 27);
+        spr.deleteSprite();
+
+        // Voltage (Quadrant 2)
+        spr.createSprite(158, 102);
+        spr.fillSprite(TFT_BLACK);
+        spr.setTextColor(TFT_WHITE);
+        spr.drawString("Voltage", 50, 8);
+        spr.setTextColor(TFT_GREEN);
+        spr.setFreeFont(FSSO24);
+        spr.drawString(String(r.V, 1), 11, 36);
+        spr.setTextColor(TFT_YELLOW);
+        spr.setFreeFont(&FreeSans9pt7b);
+        spr.drawString("VAC", 105, 85);
+        spr.pushSprite(162, 27);
+        spr.deleteSprite();
+
+        // Frequency (Quadrant 3)
+        spr.createSprite(158, 100);
+        spr.fillSprite(TFT_BLACK);
+        spr.setTextColor(TFT_WHITE);
+        spr.drawString("Freq", 62, 6);
+        spr.setTextColor(TFT_GREEN);
+        spr.setFreeFont(FSSO24);
+        spr.drawString(String(r.F, 1), 26, 34);
+        spr.setTextColor(TFT_YELLOW);
+        spr.setFreeFont(&FreeSans9pt7b);
+        spr.drawString("Hz", 108, 82);
+        spr.pushSprite(162, 137);
+        spr.deleteSprite();
+
+        // Humidity (Quadrant 4)
+        spr.createSprite(158, 100);
+        spr.fillSprite(TFT_BLACK);
+        spr.setTextColor(TFT_WHITE);
+        spr.drawString("Humidity", 43, 6);
+        spr.setTextColor(TFT_GREEN);
+        spr.setFreeFont(FSSO24);
+        spr.drawString(String(humidity, 1), 25, 34);
+        spr.setTextColor(TFT_YELLOW);
+        spr.setFreeFont(&FreeSans9pt7b);
+        spr.drawString("%RH", 65, 82);
+        spr.pushSprite(0, 137);
+        spr.deleteSprite();
+        
+        // Handle data storage and transmission
+        if (!wifiConnected) {
+            // Debug print
+            Serial.println("WiFi disconnected, backing up data...");
             
-            unsigned long timestamp = baseTime + (currentMillis / 1000);
-            saveTimestamp(timestamp);
-            
-            // Read SHT31 sensor
-            sht.read();
-            float temperature = sht.getTemperature();
-            float humidity = sht.getHumidity();
-            
-            // Read Modbus
-            READING r;
-            uint8_t result = node.readHoldingRegisters(0002, 10);
-            if (result == node.ku8MBSuccess) {
-                r.V = (float)node.getResponseBuffer(0x00) / 100;
-                r.F = (float)node.getResponseBuffer(0x09) / 100;
-            } else {
-                r.V = 0;
-                r.F = 0;
+            // Check if file exists and create with header if needed
+            if (!SD.exists(filename)) {
+                File headerFile = SD.open(filename, FILE_WRITE);
+                if (headerFile) {
+                    headerFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
+                    headerFile.close();
+                    Serial.println("Created new CSV file with header");
+                }
             }
-
-            // Update display dengan pengecekan error
-            tft.setFreeFont(&FreeSans9pt7b);
-            if (!spr.created()) {
-                spr.createSprite(TFT_HEIGHT, TFT_WIDTH);
-            }
             
-            // Status indicators with error checking
-            if (tft.textfont) {
-                // WiFi status
-                tft.setTextColor(WiFi.status() == WL_CONNECTED ? TFT_GREEN : TFT_RED);
-                tft.drawString("WiFi", 8, 5);
-                
-                // Modbus status
-                tft.setTextColor(result == node.ku8MBSuccess ? TFT_GREEN : TFT_RED);
-                tft.drawString("Modbus", 112, 5);
-                
-                // Sensor status
-                tft.setTextColor(humidity != 0 ? TFT_GREEN : TFT_RED);
-                tft.drawString("Sensor", 183, 5);
-
-                // Draw layout
-                tft.drawFastVLine(160, 25, 220, TFT_DARKCYAN);
-                tft.drawFastHLine(0, 135, 320, TFT_DARKCYAN);
-                tft.drawFastHLine(0, 25, 320, TFT_DARKCYAN);
-
-                // Temperature (Quadrant 1)
-                spr.createSprite(158, 102);
-                spr.fillSprite(TFT_BLACK);
-                spr.setTextColor(TFT_WHITE);
-                spr.drawString("Temp", 55, 8);
-                spr.setTextColor(TFT_GREEN);
-                spr.setFreeFont(FSSO24);
-                spr.drawString(String(temperature, 1), 25, 36);
-                spr.setTextColor(TFT_YELLOW);
-                spr.setFreeFont(&FreeSans9pt7b);
-                spr.drawString("C", 113, 85);
-                spr.pushSprite(0, 27);
-                spr.deleteSprite();
-
-                // Voltage (Quadrant 2)
-                spr.createSprite(158, 102);
-                spr.fillSprite(TFT_BLACK);
-                spr.setTextColor(TFT_WHITE);
-                spr.drawString("Voltage", 50, 8);
-                spr.setTextColor(TFT_GREEN);
-                spr.setFreeFont(FSSO24);
-                spr.drawString(String(r.V, 1), 11, 36);
-                spr.setTextColor(TFT_YELLOW);
-                spr.setFreeFont(&FreeSans9pt7b);
-                spr.drawString("VAC", 105, 85);
-                spr.pushSprite(162, 27);
-                spr.deleteSprite();
-
-                // Frequency (Quadrant 3)
-                spr.createSprite(158, 100);
-                spr.fillSprite(TFT_BLACK);
-                spr.setTextColor(TFT_WHITE);
-                spr.drawString("Freq", 62, 6);
-                spr.setTextColor(TFT_GREEN);
-                spr.setFreeFont(FSSO24);
-                spr.drawString(String(r.F, 1), 26, 34);
-                spr.setTextColor(TFT_YELLOW);
-                spr.setFreeFont(&FreeSans9pt7b);
-                spr.drawString("Hz", 108, 82);
-                spr.pushSprite(162, 137);
-                spr.deleteSprite();
-
-                // Humidity (Quadrant 4)
-                spr.createSprite(158, 100);
-                spr.fillSprite(TFT_BLACK);
-                spr.setTextColor(TFT_WHITE);
-                spr.drawString("Humidity", 43, 6);
-                spr.setTextColor(TFT_GREEN);
-                spr.setFreeFont(FSSO24);
-                spr.drawString(String(humidity, 1), 25, 34);
-                spr.setTextColor(TFT_YELLOW);
-                spr.setFreeFont(&FreeSans9pt7b);
-                spr.drawString("%RH", 65, 82);
-                spr.pushSprite(0, 137);
-                spr.deleteSprite();
-            }
+            // Get current number of data rows
+            int currentLines = countDataLines();
+            Serial.print("Current lines in CSV: ");
+            Serial.println(currentLines);
             
-            // Handle data storage and transmission
-            if (!wifiConnected) {
-                // Debug print
-                Serial.println("WiFi disconnected, backing up data...");
+            if (currentLines >= MAX_DATA_ROWS) {
+                // Debug FIFO operation
+                Serial.println("Max rows reached, implementing FIFO...");
                 
-                // Check if file exists and create with header if needed
-                if (!SD.exists(filename)) {
-                    File headerFile = SD.open(filename, FILE_WRITE);
-                    if (headerFile) {
-                        headerFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
-                        headerFile.close();
-                        Serial.println("Created new CSV file with header");
-                    }
+                File readFile = SD.open(filename);
+                if (!readFile) {
+                    Serial.println("Failed to open file for reading!");
+                    return;
                 }
                 
-                // Get current number of data rows
-                int currentLines = countDataLines();
-                Serial.print("Current lines in CSV: ");
-                Serial.println(currentLines);
+                String header = readFile.readStringUntil('\n');
+                String remainingData = header + "\n";
+                readFile.readStringUntil('\n'); // Skip oldest line
                 
-                if (currentLines >= MAX_DATA_ROWS) {
-                    // Debug FIFO operation
-                    Serial.println("Max rows reached, implementing FIFO...");
-                    
-                    File readFile = SD.open(filename);
-                    if (!readFile) {
-                        Serial.println("Failed to open file for reading!");
-                        return;
-                    }
-                    
-                    String header = readFile.readStringUntil('\n');
-                    String remainingData = header + "\n";
-                    readFile.readStringUntil('\n'); // Skip oldest line
-                    
-                    // Read remaining lines
-                    while (readFile.available()) {
-                        String line = readFile.readStringUntil('\n');
-                        remainingData += line + "\n";
-                    }
-                    readFile.close();
-                    
-                    // Write updated data
-                    if (SD.remove(filename)) {
-                        File writeFile = SD.open(filename, FILE_WRITE);
-                        if (writeFile) {
-                            writeFile.print(remainingData);
-                            writeFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
-                                        temperature, humidity, r.V, r.F, timestamp);
-                            writeFile.close();
-                            Serial.println("FIFO update successful");
-                        }
-                    }
-                } else {
-                    // Append new data
-                    File dataFile = SD.open(filename, FILE_WRITE);
-                    if (dataFile) {
-                        dataFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
+                // Read remaining lines
+                while (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    remainingData += line + "\n";
+                }
+                readFile.close();
+                
+                // Write updated data
+                if (SD.remove(filename)) {
+                    File writeFile = SD.open(filename, FILE_WRITE);
+                    if (writeFile) {
+                        writeFile.print(remainingData);
+                        writeFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
                                     temperature, humidity, r.V, r.F, timestamp);
-                        dataFile.close();
-                        Serial.println("Data appended to CSV");
-                    } else {
-                        Serial.println("Failed to open file for append!");
+                        writeFile.close();
+                        Serial.println("FIFO update successful");
                     }
                 }
             } else {
-                // Modified direct data transmission with correct order
-                String datakirim = String("1#") + 
-                                 String(temperature, 2) + "#" +
-                                 String(humidity, 2) + "#" +
-                                 String(r.V, 2) + "#" +
-                                 String(r.F, 2) + "#" +
-                                 String(timestamp);
-                serial.println(datakirim);
-                Serial.println("Data sent directly");
+                // Append new data
+                File dataFile = SD.open(filename, FILE_WRITE);
+                if (dataFile) {
+                    dataFile.printf("%.2f;%.2f;%.2f;%.2f;%lu\n",
+                                temperature, humidity, r.V, r.F, timestamp);
+                    dataFile.close();
+                    Serial.println("Data appended to CSV");
+                } else {
+                    Serial.println("Failed to open file for append!");
+                }
             }
+        } else {
+            // Modified direct data transmission with correct order
+            String datakirim = String("1#") + 
+                             String(temperature, 2) + "#" +
+                             String(humidity, 2) + "#" +
+                             String(r.V, 2) + "#" +
+                             String(r.F, 2) + "#" +
+                             String(timestamp);
+            serial.println(datakirim);
+            Serial.println("Data sent directly");
         }
     }
     
