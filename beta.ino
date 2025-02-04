@@ -379,75 +379,81 @@ void loop() {
         }
     }
     
-       // Process backed up data when WiFi is available - fixed
+    // Process backed up data when WiFi is available
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
-        Serial.println("Checking backup data...");
+        Serial.println("Processing backup data...");
         
         if (SD.exists(filename)) {
             File readFile = SD.open(filename);
-            if (readFile && readFile.available()) {
-                // Skip header
+            if (readFile) {
+                // Store the header
                 String header = readFile.readStringUntil('\n');
                 
-                // Read all data into array first
-                const int MAX_LINES = 100;
-                String dataLines[MAX_LINES];
-                int lineCount = 0;
+                // Create temporary storage
+                String allData = "";
                 
-                while (readFile.available() && lineCount < MAX_LINES) {
+                // Read and store all data lines
+                while (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    line.trim();  // Remove whitespace and \r
                     if (line.length() > 0) {
-                        dataLines[lineCount] = line;
-                        lineCount++;
+                        allData += line + "\n";
                     }
                 }
                 readFile.close();
                 
-                // Process all lines in sequence
-                bool anyDataSent = false;
-                for (int i = 0; i < lineCount; i++) {
-                    String line = dataLines[i];
+                // Split data into lines
+                int startIndex = 0;
+                int endIndex = allData.indexOf('\n');
+                bool dataSent = false;
+                
+                // Process each line
+                while (endIndex != -1) {
+                    String line = allData.substring(startIndex, endIndex);
+                    line.trim();
                     
-                    int pos1 = line.indexOf(';');
-                    int pos2 = line.indexOf(';', pos1 + 1);
-                    int pos3 = line.indexOf(';', pos2 + 1);
-                    int pos4 = line.indexOf(';', pos3 + 1);
-                    
-                    if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
-                        String temp = line.substring(0, pos1);
-                        String hum = line.substring(pos1 + 1, pos2);
-                        String volt = line.substring(pos2 + 1, pos3);
-                        String freq = line.substring(pos3 + 1, pos4);
-                        String timestamp = line.substring(pos4 + 1);
+                    if (line.length() > 0) {
+                        int pos1 = line.indexOf(';');
+                        int pos2 = line.indexOf(';', pos1 + 1);
+                        int pos3 = line.indexOf(';', pos2 + 1);
+                        int pos4 = line.indexOf(';', pos3 + 1);
                         
-                        // Clean all values
-                        temp.trim();
-                        hum.trim();
-                        volt.trim();
-                        freq.trim();
-                        timestamp.trim();
-                        
-                        String datakirim = String("1#") + 
-                                         temp + "#" + 
-                                         hum + "#" + 
-                                         volt + "#" + 
-                                         freq + "#" + 
-                                         timestamp;
-                        
-                        serial.println(datakirim);
-                        serial.flush(); // Ensure data is sent
-                        
-                        Serial.println("Sent backup: " + datakirim);
-                        anyDataSent = true;
-                        
-                        delay(2500); // 2.5 second delay between transmissions
+                        if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+                            String temp = line.substring(0, pos1);
+                            String hum = line.substring(pos1 + 1, pos2);
+                            String volt = line.substring(pos2 + 1, pos3);
+                            String freq = line.substring(pos3 + 1, pos4);
+                            String timestamp = line.substring(pos4 + 1);
+                            
+                            // Clean values
+                            temp.trim();
+                            hum.trim();
+                            volt.trim();
+                            freq.trim();
+                            timestamp.trim();
+                            
+                            String datakirim = String("1#") + 
+                                             temp + "#" + 
+                                             hum + "#" + 
+                                             volt + "#" + 
+                                             freq + "#" + 
+                                             timestamp;
+                            
+                            serial.println(datakirim);
+                            serial.flush();
+                            delay(3000); // 3 second delay between transmissions
+                            
+                            Serial.println("Sent backup: " + datakirim);
+                            dataSent = true;
+                        }
                     }
+                    
+                    startIndex = endIndex + 1;
+                    endIndex = allData.indexOf('\n', startIndex);
                 }
                 
-                // If any data was sent, clear the file and rewrite header
-                if (anyDataSent) {
+                // Clear file and rewrite header if data was sent
+                if (dataSent) {
                     SD.remove(filename);
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
