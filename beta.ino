@@ -172,7 +172,6 @@ void setup() {
 
 void loop() {
     unsigned long currentMillis = millis();
-    static READING r;  // Tambahkan deklarasi READING di sini
     
     // Check backlight timer
     if (screenOn && currentMillis - previousDisplayMillis >= DISPLAY_INTERVAL) {
@@ -182,61 +181,128 @@ void loop() {
         Serial.println("Display off");
     }
 
-    // Pembacaan sensor dan update display setiap 1 detik
-    static unsigned long lastDisplayUpdate = 0;
-    if (currentMillis - lastDisplayUpdate >= 1000) {
-        lastDisplayUpdate = currentMillis;
-        
-        // Baca sensor dan modbus untuk display
-        sht.read();
-        float t = sht.getTemperature();
-        float h = sht.getHumidity();
-        
-        uint8_t result = node.readHoldingRegisters(0002, 10);
-        if (result == node.ku8MBSuccess) {
-            r.V = (float)node.getResponseBuffer(0x00) / 100;
-            r.F = (float)node.getResponseBuffer(0x09) / 100;
-            tft.setTextColor(TFT_GREEN);
-        } else {
-            r.V = 0;
-            r.F = 0;
-            tft.setTextColor(TFT_RED);
-        }
-        tft.drawString("Modbus", 112, 5);
+    // Baca sensor untuk display
+    sht.read();
+    float t = sht.getTemperature();
+    float h = sht.getHumidity();
 
-        // Update display status dan garis
-        tft.setFreeFont(&FreeSans9pt7b);
-        spr.setFreeFont(&FreeSans9pt7b);
-        tft.setTextSize(1);
+    READING r;
+    uint8_t result = node.readHoldingRegisters(0002,10); 
 
-        // Status WiFi
-        if (WiFi.status() == WL_CONNECTED) {
-            tft.setTextColor(TFT_GREEN);
-        } else {
-            tft.setTextColor(TFT_RED);
-        }
-        tft.drawString("WiFi", 8, 5);
-
-        // Status Sensor
-        if (h == 0) {
-            tft.setTextColor(TFT_RED);
-        } else {
-            tft.setTextColor(TFT_GREEN);
-        }
-        tft.drawString("Sensor", 183, 5);
-
-        // Draw dividing lines
-        tft.drawFastVLine(160, 25, 220, TFT_DARKCYAN);
-        tft.drawFastHLine(0, 135, 320, TFT_DARKCYAN);
-        tft.drawFastHLine(0, 25, 320, TFT_DARKCYAN);
-
-        // Update quadrants
-        updateQuadrant1(t);     // Temperature
-        updateQuadrant2(r.V);   // Voltage
-        updateQuadrant3(r.F);   // Frequency
-        updateQuadrant4(h);     // Humidity
+    if (result == node.ku8MBSuccess){
+        r.V = (float)node.getResponseBuffer(0x00)/100;
+        r.F = (float)node.getResponseBuffer(0x09)/100;
+        tft.setTextColor(TFT_GREEN);
+        tft.drawString("Modbus",112,5); 
+    }
+  
+    if (result != node.ku8MBSuccess){
+        r.V = 0;
+        r.F = 0;
+        tft.setTextColor(TFT_RED);
+        tft.drawString("Modbus",112,5);   
     }
 
+    tft.setFreeFont(&FreeSans9pt7b);
+    spr.setFreeFont(&FreeSans9pt7b);
+    tft.setTextSize(1);
+
+    tft.drawFastVLine(160,25,220,TFT_DARKCYAN);
+    tft.drawFastHLine(0,135,320,TFT_DARKCYAN);
+    tft.drawFastHLine(0,25,320,TFT_DARKCYAN);
+
+    //Kuadran 1
+    spr.createSprite(158, 102);
+    spr.fillSprite(TFT_BLACK);
+    spr.setTextColor(TFT_WHITE);
+    spr.drawString("Temp",55,8);
+    spr.setTextColor(TFT_GREEN);
+    spr.setFreeFont(FSSO24);
+    spr.drawString(String(t,1),25,36);
+    spr.setTextSize(1);
+    spr.setTextColor(TFT_YELLOW); 
+    spr.setFreeFont(&FreeSans9pt7b);
+    spr.drawString("C",113,85);
+    spr.pushSprite(0,27); 
+    spr.deleteSprite();
+
+    //Kuadran 2
+    spr.setFreeFont(&FreeSans9pt7b);
+    spr.createSprite(158, 102);
+    spr.fillSprite(TFT_BLACK);
+    spr.setTextColor(TFT_WHITE);
+    spr.setTextSize(1);
+    spr.drawString("Voltage",50,8);
+    spr.setTextColor(TFT_GREEN);
+    spr.setFreeFont(FSSO24);
+    spr.drawString(String(r.V,1),11,36);
+    spr.setTextSize(1);
+    spr.setTextColor(TFT_YELLOW);
+    spr.setFreeFont(&FreeSans9pt7b);
+    spr.drawString("VAC",105,85);
+    spr.pushSprite(162,27); 
+    spr.deleteSprite();
+
+    //Kuadran 3
+    spr.createSprite(158, 100);
+    spr.fillSprite(TFT_BLACK);
+    spr.setTextColor(TFT_WHITE);
+    spr.setTextSize(1);
+    spr.drawString("Freq",62,6);
+    spr.setTextColor(TFT_GREEN);
+    spr.setFreeFont(FSSO24);
+    spr.drawString(String(r.F,1),26,34);
+    spr.setTextSize(1);
+    spr.setTextColor(TFT_YELLOW);
+    spr.setFreeFont(&FreeSans9pt7b);
+    spr.drawString("Hz",108,82);  
+    spr.pushSprite(162,137);
+    spr.deleteSprite();
+
+    //Kuadran 4
+    spr.createSprite(158, 100);
+    spr.fillSprite(TFT_BLACK);
+    spr.setTextColor(TFT_WHITE);
+    spr.drawString("Humidity",43,6);
+    spr.setTextColor(TFT_GREEN);
+    spr.setFreeFont(FSSO24);
+    spr.drawString(String(h,1),25,34);
+    spr.setTextSize(1);
+    spr.setTextColor(TFT_YELLOW);
+    spr.setFreeFont(&FreeSans9pt7b);
+    spr.drawString("%RH",65,82);
+    spr.pushSprite(0,137); 
+    spr.deleteSprite();
+
+    if (h==0) {
+        tft.setTextSize(1);
+        tft.setFreeFont(&FreeSans9pt7b);
+        tft.setTextColor(TFT_RED);
+        tft.drawString("Sensor",183,5);
+    }
+    if (h != 0) {
+        tft.setTextSize(1);
+        tft.setFreeFont(&FreeSans9pt7b);
+        tft.setTextColor(TFT_GREEN);
+        tft.drawString("Sensor",183,5);
+    }
+
+    if (WiFi.status() != WL_CONNECTED) { 
+        tft.setTextSize(1);
+        tft.setFreeFont(&FreeSans9pt7b);
+        tft.setTextColor(TFT_GREEN);
+        tft.drawString("WiFi",8,5);
+        WiFi.begin(ssid, password);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        tft.setTextSize(1);
+        tft.setFreeFont(&FreeSans9pt7b);
+        tft.setTextColor(TFT_GREEN);
+        tft.drawString("WiFi",8,5);
+    }
+
+    // ... rest of the existing code for data handling ...
+    
     // Proses penyimpanan dan pengiriman data
     if (currentMillis - previousMillisSensor >= SENSOR_INTERVAL) {
         previousMillisSensor = currentMillis;
@@ -442,14 +508,14 @@ void updateQuadrant1(float temp) {
     spr.createSprite(158, 102);
     spr.fillSprite(TFT_BLACK);
     spr.setTextColor(TFT_WHITE);
-    spr.drawString("Temp", 55, 8);
+    spr.drawString("Temp",55,8);
     spr.setTextColor(TFT_GREEN);
     spr.setFreeFont(FSSO24);
-    spr.drawString(String(temp, 1), 25, 36);
+    spr.drawString(String(temp,1),25,36);
     spr.setTextColor(TFT_YELLOW);
     spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("C", 113, 85);
-    spr.pushSprite(0, 27);
+    spr.drawString("C",113,85);
+    spr.pushSprite(0,27);
     spr.deleteSprite();
 }
 
@@ -457,14 +523,14 @@ void updateQuadrant2(float voltage) {
     spr.createSprite(158, 102);
     spr.fillSprite(TFT_BLACK);
     spr.setTextColor(TFT_WHITE);
-    spr.drawString("Voltage", 50, 8);
+    spr.drawString("Voltage",50,8);
     spr.setTextColor(TFT_GREEN);
     spr.setFreeFont(FSSO24);
-    spr.drawString(String(voltage, 1), 11, 36);
+    spr.drawString(String(voltage,1),11,36);
     spr.setTextColor(TFT_YELLOW);
     spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("VAC", 105, 85);
-    spr.pushSprite(162, 27);
+    spr.drawString("VAC",105,85);
+    spr.pushSprite(162,27);
     spr.deleteSprite();
 }
 
@@ -472,14 +538,14 @@ void updateQuadrant3(float freq) {
     spr.createSprite(158, 100);
     spr.fillSprite(TFT_BLACK);
     spr.setTextColor(TFT_WHITE);
-    spr.drawString("Freq", 62, 6);
+    spr.drawString("Freq",62,6);
     spr.setTextColor(TFT_GREEN);
     spr.setFreeFont(FSSO24);
-    spr.drawString(String(freq, 1), 26, 34);
+    spr.drawString(String(freq,1),26,34);
     spr.setTextColor(TFT_YELLOW);
     spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("Hz", 108, 82);
-    spr.pushSprite(162, 137);
+    spr.drawString("Hz",108,82);
+    spr.pushSprite(162,137);
     spr.deleteSprite();
 }
 
@@ -487,13 +553,13 @@ void updateQuadrant4(float humidity) {
     spr.createSprite(158, 100);
     spr.fillSprite(TFT_BLACK);
     spr.setTextColor(TFT_WHITE);
-    spr.drawString("Humidity", 43, 6);
+    spr.drawString("Humidity",43,6);
     spr.setTextColor(TFT_GREEN);
     spr.setFreeFont(FSSO24);
-    spr.drawString(String(humidity, 1), 25, 34);
+    spr.drawString(String(humidity,1),25,34);
     spr.setTextColor(TFT_YELLOW);
     spr.setFreeFont(&FreeSans9pt7b);
-    spr.drawString("%RH", 65, 82);
-    spr.pushSprite(0, 137);
+    spr.drawString("%RH",65,82);
+    spr.pushSprite(0,137);
     spr.deleteSprite();
 }
