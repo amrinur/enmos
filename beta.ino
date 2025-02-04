@@ -26,6 +26,8 @@ const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
 const long WIFI_CHECK_INTERVAL = 7000;
+const int WIFI_TIMEOUT = 10000; // 10 detik timeout
+const int WIFI_RECONNECT_DELAY = 5000; // 5 detik delay sebelum reconnect
 
 // File and timing
 char filename[25] = "/tth.csv";
@@ -109,6 +111,36 @@ void setupDisplay() {
     tft.fillScreen(TFT_BLACK);
 }
 
+void setupWiFi() {
+    WiFi.disconnect(true);
+    delay(1000);
+    
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(true);
+    
+    Serial.print("Connecting to WiFi");
+    WiFi.begin(ssid, password);
+    
+    unsigned long startAttemptTime = millis();
+    
+    while (WiFi.status() != WL_CONNECTED && 
+           millis() - startAttemptTime < WIFI_TIMEOUT) {
+        Serial.print(".");
+        delay(200);
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiConnected = true;
+        Serial.println("\nWiFi Connected!");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+    } else {
+        wifiConnected = false;
+        Serial.println("\nWiFi Connection Failed!");
+    }
+}
+
 void setup() {
     // Initialize Serial communications
     Serial.begin(115200);
@@ -131,8 +163,20 @@ void setup() {
     Serial.println("SD card initialized.");
     
     // Initialize WiFi
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
+    setupWiFi();
+    
+    if (wifiConnected) {
+        timeClient.begin();
+        if (timeClient.update()) {
+            unsigned long ntpTime = timeClient.getEpochTime();
+            saveTimestamp(ntpTime);
+            baseTime = ntpTime;
+        } else {
+            baseTime = getStoredTimestamp();
+        }
+    } else {
+        baseTime = getStoredTimestamp();
+    }
     
     // Display WiFi scanning message
     tft.fillScreen(TFT_BLACK);
@@ -154,31 +198,6 @@ void setup() {
     }
     delay(2000);
     tft.fillScreen(TFT_BLACK);
-    
-    // Connect to WiFi
-    Serial.print("Connecting to WiFi");
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiConnected = true;
-        Serial.println("WiFi Connected!");
-        
-        timeClient.begin();
-        if (timeClient.update()) {
-            unsigned long ntpTime = timeClient.getEpochTime();
-            saveTimestamp(ntpTime);
-            baseTime = ntpTime;
-        } else {
-            baseTime = getStoredTimestamp();
-        }
-    } else {
-        baseTime = getStoredTimestamp();
-    }
 }
 
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
@@ -275,18 +294,18 @@ void updateDisplay(float temperature, float humidity, float voltage, float frequ
 void loop() {
     unsigned long currentMillis = millis();
     
+    // Pindahkan pengecekan WiFi ke awal loop
+    if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
+        previousWiFiCheck = currentMillis;
+        checkWiFiConnection();
+    }
+    
     // Check backlight timer
     if (screenOn && currentMillis - previousDisplayMillis >= DISPLAY_INTERVAL) {
         previousDisplayMillis = currentMillis;
         screenOn = false;
         digitalWrite(LCD_BACKLIGHT, LOW);
         Serial.println("Display off");
-    }
-    
-    // Check WiFi connection
-    if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
-        previousWiFiCheck = currentMillis;
-        checkWiFiConnection();
     }
     
     // Read sensors and update display
@@ -450,19 +469,11 @@ void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
         wifiConnected = false;
         Serial.println("WiFi disconnected");
-        WiFi.disconnect();
-        WiFi.begin(ssid, password);
         
-        int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-            delay(500);
-            attempts++;
-        }
+        // Tunggu sebentar sebelum mencoba reconnect
+        delay(WIFI_RECONNECT_DELAY);
         
-        if (WiFi.status() == WL_CONNECTED) {
-            wifiConnected = true;
-            Serial.println("WiFi reconnected");
-        }
+        setupWiFi();
     } else {
         wifiConnected = true;
     }
