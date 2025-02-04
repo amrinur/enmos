@@ -25,7 +25,7 @@ const char* ssid = "lime";
 const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 6000;
+const long WIFI_CHECK_INTERVAL = 10000;
 
 // File and timing
 char filename[25] = "/tth.csv";
@@ -385,34 +385,35 @@ void loop() {
         Serial.println("Processing backup data...");
         
         if (SD.exists(filename)) {
-            File readFile = SD.open(filename);
-            if (readFile) {
-                // Store the header
-                String header = readFile.readStringUntil('\n');
+            // First count lines to determine array size
+            int totalLines = countDataLines();
+            if (totalLines > 0) {
+                Serial.println("Found " + String(totalLines) + " lines to process");
                 
-                // Create temporary storage
-                String allData = "";
+                // Create array to store lines
+                String* dataLines = new String[totalLines];
+                int lineIndex = 0;
                 
-                // Read and store all data lines
-                while (readFile.available()) {
-                    String line = readFile.readStringUntil('\n');
-                    if (line.length() > 0) {
-                        allData += line + "\n";
-                    }
-                }
-                readFile.close();
-                
-                // Split data into lines
-                int startIndex = 0;
-                int endIndex = allData.indexOf('\n');
-                bool dataSent = false;
-                
-                // Process each line
-                while (endIndex != -1) {
-                    String line = allData.substring(startIndex, endIndex);
-                    line.trim();
+                // Read all lines into array
+                File readFile = SD.open(filename);
+                if (readFile) {
+                    // Skip header
+                    readFile.readStringUntil('\n');
                     
-                    if (line.length() > 0) {
+                    // Read data lines
+                    while (readFile.available() && lineIndex < totalLines) {
+                        String line = readFile.readStringUntil('\n');
+                        line.trim();
+                        if (line.length() > 0) {
+                            dataLines[lineIndex] = line;
+                            lineIndex++;
+                        }
+                    }
+                    readFile.close();
+                    
+                    // Process each line in array with increased delays
+                    for (int i = 0; i < lineIndex; i++) {
+                        String line = dataLines[i];
                         int pos1 = line.indexOf(';');
                         int pos2 = line.indexOf(';', pos1 + 1);
                         int pos3 = line.indexOf(';', pos2 + 1);
@@ -425,43 +426,35 @@ void loop() {
                             String freq = line.substring(pos3 + 1, pos4);
                             String timestamp = line.substring(pos4 + 1);
                             
-                            // Clean values
-                            temp.trim();
-                            hum.trim();
-                            volt.trim();
-                            freq.trim();
-                            timestamp.trim();
-                            
                             String datakirim = String("1#") + 
-                                             temp + "#" + 
-                                             hum + "#" + 
-                                             volt + "#" + 
-                                             freq + "#" + 
-                                             timestamp;
+                                             temp.trim() + "#" + 
+                                             hum.trim() + "#" + 
+                                             volt.trim() + "#" + 
+                                             freq.trim() + "#" + 
+                                             timestamp.trim();
                             
+                            delay(1000); // Pre-transmission delay
                             serial.println(datakirim);
                             serial.flush();
-                            delay(3000); // 3 second delay between transmissions
+                            delay(5000); // Post-transmission delay
                             
-                            Serial.println("Sent backup: " + datakirim);
-                            dataSent = true;
+                            Serial.println("Sent backup [" + String(i+1) + "/" + String(lineIndex) + "]: " + datakirim);
+                            delay(4000); // Additional delay between transmissions
                         }
                     }
                     
-                    startIndex = endIndex + 1;
-                    endIndex = allData.indexOf('\n', startIndex);
-                }
-                
-                // Clear file and rewrite header if data was sent
-                if (dataSent) {
+                    // Clear file and write header
                     SD.remove(filename);
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
                         writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
                         writeFile.close();
-                        Serial.println("Backup file cleared after sending all data");
+                        Serial.println("Backup file cleared after sending " + String(lineIndex) + " records");
                     }
                 }
+                
+                // Clean up
+                delete[] dataLines;
             }
         }
     }
