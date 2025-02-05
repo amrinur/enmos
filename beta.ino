@@ -40,7 +40,7 @@ const long DISPLAY_INTERVAL = 180000; // 3 minutes backlight timer
 bool screenOn = true;
 
 // FIFO constants
-const int MAX_DATA_ROWS = 100;
+const int MAX_DATA_ROWS = 10000;
 
 typedef struct {
     float V;
@@ -388,57 +388,58 @@ void loop() {
             File readFile = SD.open(filename);
             if (readFile && readFile.available()) {
                 String header = readFile.readStringUntil('\n');
-                String remainingData = "";
-                remainingData += header;
-                remainingData += "\n";
+                String remainingData = header + "\n";  // Start with header
                 bool dataSent = false;
                 
-                if (readFile.available()) {
-                    String line = readFile.readStringUntil('\n');
-                    line.trim();  // Remove any whitespace/newline
+                // Skip any empty lines after header
+                String line;
+                do {
+                    line = readFile.readStringUntil('\n');
+                    line.trim();
+                } while (line.length() == 0 && readFile.available());
+                
+                // Process valid line if found
+                if (line.length() > 0) {
+                    Serial.println("Processing line: " + line);
                     
-                    if (line.length() > 0) {
-                        Serial.println("Processing line: " + line);
+                    int pos1 = line.indexOf(';');
+                    int pos2 = line.indexOf(';', pos1 + 1);
+                    int pos3 = line.indexOf(';', pos2 + 1);
+                    int pos4 = line.indexOf(';', pos3 + 1);
+                    
+                    if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+                        // Process valid data line
+                        String temp = line.substring(0, pos1);
+                        String hum = line.substring(pos1 + 1, pos2);
+                        String volt = line.substring(pos2 + 1, pos3);
+                        String freq = line.substring(pos3 + 1, pos4);
+                        String timestamp = line.substring(pos4 + 1);
                         
-                        int pos1 = line.indexOf(';');
-                        int pos2 = line.indexOf(';', pos1 + 1);
-                        int pos3 = line.indexOf(';', pos2 + 1);
-                        int pos4 = line.indexOf(';', pos3 + 1);
+                        temp.trim(); 
+                        hum.trim(); 
+                        volt.trim(); 
+                        freq.trim(); 
+                        timestamp.trim();
                         
-                        if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
-                            String temp = line.substring(0, pos1);
-                            String hum = line.substring(pos1 + 1, pos2);
-                            String volt = line.substring(pos2 + 1, pos3);
-                            String freq = line.substring(pos3 + 1, pos4);
-                            String timestamp = line.substring(pos4 + 1);
-                            
-                            // Clean up the strings
-                            temp.trim(); 
-                            hum.trim(); 
-                            volt.trim(); 
-                            freq.trim(); 
-                            timestamp.trim();
-                            
-                            String datakirim = String("1#") + 
-                                             temp + "#" + 
-                                             hum + "#" + 
-                                             volt + "#" + 
-                                             freq + "#" + 
-                                             timestamp;
-                            
-                            serial.println(datakirim);
-                            Serial.println("Sent backup: " + datakirim);
-                            dataSent = true;
-                        }
+                        String datakirim = String("1#") + 
+                                         temp + "#" + 
+                                         hum + "#" + 
+                                         volt + "#" + 
+                                         freq + "#" + 
+                                         timestamp;
+                        
+                        serial.println(datakirim);
+                        Serial.println("Sent backup: " + datakirim);
+                        dataSent = true;
                     }
                 }
                 
-                // Copy remaining lines
+                // Copy remaining valid lines
                 while (readFile.available()) {
-                    String line = readFile.readStringUntil('\n');
+                    line = readFile.readStringUntil('\n');
+                    line.trim();
                     if (line.length() > 0) {
-                        remainingData += line;
-                        remainingData += "\n";
+                        remainingData += line + "\n";
                     }
                 }
                 readFile.close();
