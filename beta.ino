@@ -369,8 +369,9 @@ void loop() {
                     }
                 }
             } else {
-                File dataFile = SD.open(filename, FILE_APPEND);
+                File dataFile = SD.open(filename, FILE_WRITE);  // Changed from FILE_APPEND
                 if (dataFile) {
+                    dataFile.seek(dataFile.size());  // Move to end of file
                     if (currentLines == -1) {  // If only header exists
                         dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
                                     temperature, humidity, r.V, r.F, timestamp);
