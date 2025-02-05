@@ -40,7 +40,7 @@ const long DISPLAY_INTERVAL = 180000; // 3 minutes backlight timer
 bool screenOn = true;
 
 // FIFO constants
-const int MAX_DATA_ROWS = 10000;
+const int MAX_DATA_ROWS = 1000;
 
 typedef struct {
     float V;
@@ -60,7 +60,7 @@ void checkWiFiConnection();
 int countDataLines();
 void setupDisplay();
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
-                bool modbusOK, bool wifiOK, bool sensorOK, unsigned long timestamp);
+                  bool modbusOK, bool wifiOK, bool sensorOK, unsigned long timestamp);
 
 // Function to get stored timestamp
 unsigned long getStoredTimestamp() {
@@ -182,7 +182,7 @@ void setup() {
 }
 
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
-                bool modbusOK, bool wifiOK, bool sensorOK, unsigned long timestamp) {
+                  bool modbusOK, bool wifiOK, bool sensorOK, unsigned long timestamp) {
     // Status indicators
     tft.setTextColor(wifiOK ? TFT_GREEN : TFT_RED);
     tft.drawString("WiFi", 8, 5);
@@ -272,12 +272,6 @@ void updateDisplay(float temperature, float humidity, float voltage, float frequ
     spr.deleteSprite();
 }
 
-// Add these variables after other global declarations
-bool transmissionInProgress = false;
-const unsigned long TRANSMISSION_TIMEOUT = 1000; // 1 second timeout
-const unsigned long TRANSMISSION_DELAY = 500;    // 0.5 second between transmissions
-char dataBuffer[128];  // Buffer for data formatting
-
 void loop() {
     unsigned long currentMillis = millis();
     
@@ -322,7 +316,7 @@ void loop() {
         
         // Update display
         updateDisplay(temperature, humidity, r.V, r.F, modbusOK, 
-                    wifiConnected, (humidity != 0), timestamp);
+                     wifiConnected, (humidity != 0), timestamp);
 
         // Handle data storage and transmission
         if (!wifiConnected) {
@@ -331,89 +325,124 @@ void loop() {
             if (!SD.exists(filename)) {
                 File headerFile = SD.open(filename, FILE_WRITE);
                 if (headerFile) {
-                    headerFile.print(F("Temperature;Humidity;Voltage;Frequency;Timestamp"));
+                    // Write header without extra newline
+                    headerFile.print("Temperature;Humidity;Voltage;Frequency;Timestamp");
                     headerFile.close();
+                    Serial.println("Created new CSV file with header");
                 }
             }
             
-            File dataFile = SD.open(filename, FILE_WRITE);
-            if (dataFile) {
-                dataFile.seek(dataFile.size());
-                snprintf(dataBuffer, sizeof(dataBuffer), "\n%.2f;%.2f;%.2f;%.2f;%lu",
-                        temperature, humidity, r.V, r.F, timestamp);
-                dataFile.print(dataBuffer);
-                dataFile.close();
-            }
-        } else {
-            if (!transmissionInProgress) {
-                transmissionInProgress = true;
-                snprintf(dataBuffer, sizeof(dataBuffer), "1#%.2f#%.2f#%.2f#%.2f#%lu",
-                        temperature, humidity, r.V, r.F, timestamp);
-                serial.println(dataBuffer);
-                delay(TRANSMISSION_DELAY);
-                transmissionInProgress = false;
+            int currentLines = countDataLines();
+            
+            if (currentLines >= MAX_DATA_ROWS) {
+                File readFile = SD.open(filename);
+                if (!readFile) {
+                    Serial.println("Failed to open file for reading!");
+                    return;
+                }
+                
+                String header = readFile.readStringUntil('\n');
+                String remainingData = header;  // Remove \n after header
+                readFile.readStringUntil('\n'); // Skip oldest line
+                
+                while (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    if (line.length() > 0) {
+                        remainingData += "\n" + line;  // Add newline before each data line
+                    }
+                }
+                readFile.close();
+                
+                if (SD.remove(filename)) {
+                    File writeFile = SD.open(filename, FILE_WRITE);
+                    if (writeFile) {
+                        writeFile.print(remainingData);
+                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                                    temperature, humidity, r.V, r.F, timestamp);
+                        writeFile.close();
+                    }
+                }
+            } else {
+                File dataFile = SD.open(filename, FILE_APPEND);
+                if (dataFile) {
+                    dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                                temperature, humidity, r.V, r.F, timestamp);
+                    dataFile.close();
+                }
             }
         }
     }
     
     // Process backed up data when WiFi is available - fixed
-    if (currentMillis - previousMillis >= INTERVAL && wifiConnected && !transmissionInProgress) {
+    if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
         Serial.println("Checking backup data...");
         
         if (SD.exists(filename)) {
             File readFile = SD.open(filename);
             if (readFile && readFile.available()) {
-                char lineBuf[128];
-                int idx = 0;
+                String header = readFile.readStringUntil('\n');
+                String remainingData = header;  // Remove \n after header
+                bool dataSent = false;
                 
-                // Skip header
-                readFile.readStringUntil('\n');
-                
-                // Read first data line
-                while (readFile.available()) {
-                    char c = readFile.read();
-                    if (c == '\n' || idx >= sizeof(lineBuf) - 1) {
-                        lineBuf[idx] = '\0';
-                        if (idx > 0) {  // Valid line found
-                            float temp, hum, volt, freq;
-                            unsigned long tstamp;
+                if (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    line.trim();
+                    
+                    if (line.length() > 0) {
+                        Serial.println("Processing line: " + line);
+                        
+                        int pos1 = line.indexOf(';');
+                        int pos2 = line.indexOf(';', pos1 + 1);
+                        int pos3 = line.indexOf(';', pos2 + 1);
+                        int pos4 = line.indexOf(';', pos3 + 1);
+                        
+                        if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+                            String temp = line.substring(0, pos1);
+                            String hum = line.substring(pos1 + 1, pos2);
+                            String volt = line.substring(pos2 + 1, pos3);
+                            String freq = line.substring(pos3 + 1, pos4);
+                            String timestamp = line.substring(pos4 + 1);
                             
-                            if (sscanf(lineBuf, "%f;%f;%f;%f;%lu", 
-                                    &temp, &hum, &volt, &freq, &tstamp) == 5) {
-                                
-                                transmissionInProgress = true;
-                                snprintf(dataBuffer, sizeof(dataBuffer), 
-                                    "1#%.2f#%.2f#%.2f#%.2f#%lu",
-                                    temp, hum, volt, freq, tstamp);
-                                serial.println(dataBuffer);
-                                delay(TRANSMISSION_DELAY);
-                                
-                                // Copy remaining file content
-                                File tempFile = SD.open("/temp.csv", FILE_WRITE);
-                                if (tempFile) {
-                                    tempFile.print(F("Temperature;Humidity;Voltage;Frequency;Timestamp\n"));
-                                    
-                                    while (readFile.available()) {
-                                        char c = readFile.read();
-                                        tempFile.write(c);
-                                    }
-                                    tempFile.close();
-                                    readFile.close();
-                                    
-                                    SD.remove(filename);
-                                    SD.rename("/temp.csv", filename);
-                                }
-                                break;  // Process one line at a time
-                            }
+                            // Clean up the strings
+                            temp.trim(); 
+                            hum.trim(); 
+                            volt.trim(); 
+                            freq.trim(); 
+                            timestamp.trim();
+                            
+                            String datakirim = String("1#") + 
+                                             temp + "#" + 
+                                             hum + "#" + 
+                                             volt + "#" + 
+                                             freq + "#" + 
+                                             timestamp;
+                            
+                            serial.println(datakirim);
+                            Serial.println("Sent backup: " + datakirim);
+                            dataSent = true;
                         }
-                        idx = 0;
-                    } else {
-                        lineBuf[idx++] = c;
                     }
                 }
-                transmissionInProgress = false;
+                
+                // Copy remaining lines
+                while (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    if (line.length() > 0) {
+                        remainingData += "\n" + line;
+                    }
+                }
                 readFile.close();
+                
+                if (dataSent) {
+                    SD.remove(filename);
+                    File writeFile = SD.open(filename, FILE_WRITE);
+                    if (writeFile) {
+                        writeFile.print(remainingData);
+                        writeFile.close();
+                        Serial.println("Backup file updated");
+                    }
+                }
             }
         }
     }
