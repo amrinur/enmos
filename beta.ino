@@ -25,16 +25,14 @@ const char* ssid = "lime";
 const char* password = "00000000";
 bool wifiConnected = false;
 unsigned long previousWiFiCheck = 0;
-const long WIFI_CHECK_INTERVAL = 7000;
-const int WIFI_TIMEOUT = 10000; // 10 detik timeout
-const int WIFI_RECONNECT_DELAY = 5000; // 5 detik delay sebelum reconnect
+const long WIFI_CHECK_INTERVAL = 14000;
 
 // File and timing
 char filename[25] = "/tth.csv";
 unsigned long previousMillis = 0;
 unsigned long previousMillisSensor = 0;
-const long INTERVAL = 11000;        // Interval kirim data SD
-const long SENSOR_INTERVAL = 40000; // Interval baca sensor
+const long INTERVAL = 17000;        // Interval kirim data SD
+const long SENSOR_INTERVAL = 30000; // Interval baca sensor
 
 // Display timing
 unsigned long previousDisplayMillis = 0;
@@ -42,7 +40,7 @@ const long DISPLAY_INTERVAL = 180000; // 3 minutes backlight timer
 bool screenOn = true;
 
 // FIFO constants
-const int MAX_DATA_ROWS = 10000;
+const int MAX_DATA_ROWS = 100;
 
 typedef struct {
     float V;
@@ -111,36 +109,6 @@ void setupDisplay() {
     tft.fillScreen(TFT_BLACK);
 }
 
-void setupWiFi() {
-    WiFi.disconnect(true);
-    delay(1000);
-    
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.persistent(true);
-    
-    Serial.print("Connecting to WiFi");
-    WiFi.begin(ssid, password);
-    
-    unsigned long startAttemptTime = millis();
-    
-    while (WiFi.status() != WL_CONNECTED && 
-           millis() - startAttemptTime < WIFI_TIMEOUT) {
-        Serial.print(".");
-        delay(200);
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiConnected = true;
-        Serial.println("\nWiFi Connected!");
-        Serial.print("IP Address: ");
-        Serial.println(WiFi.localIP());
-    } else {
-        wifiConnected = false;
-        Serial.println("\nWiFi Connection Failed!");
-    }
-}
-
 void setup() {
     // Initialize Serial communications
     Serial.begin(115200);
@@ -163,20 +131,8 @@ void setup() {
     Serial.println("SD card initialized.");
     
     // Initialize WiFi
-    setupWiFi();
-    
-    if (wifiConnected) {
-        timeClient.begin();
-        if (timeClient.update()) {
-            unsigned long ntpTime = timeClient.getEpochTime();
-            saveTimestamp(ntpTime);
-            baseTime = ntpTime;
-        } else {
-            baseTime = getStoredTimestamp();
-        }
-    } else {
-        baseTime = getStoredTimestamp();
-    }
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
     
     // Display WiFi scanning message
     tft.fillScreen(TFT_BLACK);
@@ -198,6 +154,31 @@ void setup() {
     }
     delay(2000);
     tft.fillScreen(TFT_BLACK);
+    
+    // Connect to WiFi
+    Serial.print("Connecting to WiFi");
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiConnected = true;
+        Serial.println("WiFi Connected!");
+        
+        timeClient.begin();
+        if (timeClient.update()) {
+            unsigned long ntpTime = timeClient.getEpochTime();
+            saveTimestamp(ntpTime);
+            baseTime = ntpTime;
+        } else {
+            baseTime = getStoredTimestamp();
+        }
+    } else {
+        baseTime = getStoredTimestamp();
+    }
 }
 
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, 
@@ -294,18 +275,18 @@ void updateDisplay(float temperature, float humidity, float voltage, float frequ
 void loop() {
     unsigned long currentMillis = millis();
     
-    // Pindahkan pengecekan WiFi ke awal loop
-    if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
-        previousWiFiCheck = currentMillis;
-        checkWiFiConnection();
-    }
-    
     // Check backlight timer
     if (screenOn && currentMillis - previousDisplayMillis >= DISPLAY_INTERVAL) {
         previousDisplayMillis = currentMillis;
         screenOn = false;
         digitalWrite(LCD_BACKLIGHT, LOW);
         Serial.println("Display off");
+    }
+    
+    // Check WiFi connection
+    if (currentMillis - previousWiFiCheck >= WIFI_CHECK_INTERVAL) {
+        previousWiFiCheck = currentMillis;
+        checkWiFiConnection();
     }
     
     // Read sensors and update display
@@ -398,82 +379,102 @@ void loop() {
         }
     }
     
-    // Process backed up data when WiFi is available
+    // Process backed up data when WiFi is available - fixed
     if (currentMillis - previousMillis >= INTERVAL && wifiConnected) {
         previousMillis = currentMillis;
+        Serial.println("Checking backup data...");
         
-        File readFile = SD.open(filename);
-        if (readFile && readFile.available()) {
-            String header = readFile.readStringUntil('\n');
-            String remainingData = header + "\n";
-            bool dataSent = false;
-            
-            // Read and send all data lines
-            while (readFile.available()) {
-                String line = readFile.readStringUntil('\n');
-                if (line.length() > 0) {
-                    int semicolons = 0;
-                    for (unsigned int i = 0; i < line.length(); i++) {
-                        if (line[i] == ';') semicolons++;
-                    }
+        if (SD.exists(filename)) {
+            File readFile = SD.open(filename);
+            if (readFile && readFile.available()) {
+                String header = readFile.readStringUntil('\n');
+                String remainingData = "";
+                remainingData += header;
+                remainingData += "\n";
+                bool dataSent = false;
+                
+                if (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    line.trim();  // Remove any whitespace/newline
                     
-                    if (semicolons == 4) {
+                    if (line.length() > 0) {
+                        Serial.println("Processing line: " + line);
+                        
                         int pos1 = line.indexOf(';');
                         int pos2 = line.indexOf(';', pos1 + 1);
                         int pos3 = line.indexOf(';', pos2 + 1);
                         int pos4 = line.indexOf(';', pos3 + 1);
                         
-                        String temp = line.substring(0, pos1);
-                        String hum = line.substring(pos1 + 1, pos2);
-                        String volt = line.substring(pos2 + 1, pos3);
-                        String freq = line.substring(pos3 + 1, pos4);
-                        String timestamp = line.substring(pos4 + 1);
-                        
-                        // Clean values
-                        temp.trim();
-                        hum.trim();
-                        volt.trim();
-                        freq.trim();
-                        timestamp.trim();
-                        
-                        String datakirim = String("1#") + 
-                                         temp + "#" + 
-                                         hum + "#" + 
-                                         volt + "#" + 
-                                         freq + "#" + 
-                                         timestamp;
-                    
-                        serial.println(datakirim);
-                        dataSent = true;
-                        delay(100); // Delay kecil antara pengiriman untuk stabilitas
+                        if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
+                            String temp = line.substring(0, pos1);
+                            String hum = line.substring(pos1 + 1, pos2);
+                            String volt = line.substring(pos2 + 1, pos3);
+                            String freq = line.substring(pos3 + 1, pos4);
+                            String timestamp = line.substring(pos4 + 1);
+                            
+                            // Clean up the strings
+                            temp.trim(); 
+                            hum.trim(); 
+                            volt.trim(); 
+                            freq.trim(); 
+                            timestamp.trim();
+                            
+                            String datakirim = String("1#") + 
+                                             temp + "#" + 
+                                             hum + "#" + 
+                                             volt + "#" + 
+                                             freq + "#" + 
+                                             timestamp;
+                            
+                            serial.println(datakirim);
+                            Serial.println("Sent backup: " + datakirim);
+                            dataSent = true;
+                        }
                     }
                 }
-            }
-            
-            readFile.close();
-            
-            // Jika ada data yang terkirim, hapus file dan buat yang baru dengan header
-            if (dataSent) {
-                SD.remove(filename);
-                File writeFile = SD.open(filename, FILE_WRITE);
-                if (writeFile) {
-                    writeFile.println("Temperature;Humidity;Voltage;Frequency;Timestamp");
-                    writeFile.close();
+                
+                // Copy remaining lines
+                while (readFile.available()) {
+                    String line = readFile.readStringUntil('\n');
+                    if (line.length() > 0) {
+                        remainingData += line;
+                        remainingData += "\n";
+                    }
+                }
+                readFile.close();
+                
+                if (dataSent) {
+                    SD.remove(filename);
+                    File writeFile = SD.open(filename, FILE_WRITE);
+                    if (writeFile) {
+                        writeFile.print(remainingData);
+                        writeFile.close();
+                        Serial.println("Backup file updated");
+                    }
                 }
             }
         }
     }
 }
 
+
 void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
         wifiConnected = false;
         Serial.println("WiFi disconnected");
+        WiFi.disconnect();
+        WiFi.begin(ssid, password);
         
-        // Tunggu sebentar sebelum mencoba reconnect
-        delay(WIFI_RECONNECT_DELAY);
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+            delay(500);
+            attempts++;
+        }
         
-        setupWiFi();
+        if (WiFi.status() == WL_CONNECTED) {
+            wifiConnected = true;
+            Serial.println("WiFi reconnected");
+        }
     } else {
         wifiConnected = true;
     }
