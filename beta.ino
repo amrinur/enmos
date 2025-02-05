@@ -40,7 +40,7 @@ const long DISPLAY_INTERVAL = 180000; // 3 minutes backlight timer
 bool screenOn = true;
 
 // FIFO constants
-const int MAX_DATA_ROWS = 100;
+const int MAX_DATA_ROWS = 1000;
 
 typedef struct {
     float V;
@@ -327,6 +327,7 @@ void loop() {
                 if (headerFile) {
                     headerFile.print("Temperature;Humidity;Voltage;Frequency;Timestamp");
                     headerFile.close();
+                    Serial.println("Created new CSV file with header");
                 }
             }
             
@@ -340,21 +341,18 @@ void loop() {
                 }
                 
                 String header = readFile.readStringUntil('\n');
-                header.trim();  // Remove any whitespace from header
-                String remainingData = header;  // Start with clean header
-                readFile.readStringUntil('\n'); // Skip oldest line
+                String remainingData = header;  // Simpan header
+                String line;
+                int lineCount = 0;
                 
-                bool firstLine = true;
+                // Skip baris pertama (header) dan kedua (data terlama)
+                readFile.readStringUntil('\n'); 
+                
+                // Baca sisa data
                 while (readFile.available()) {
-                    String line = readFile.readStringUntil('\n');
-                    line.trim();  // Remove any whitespace
-                    if (line.length() > 0) {
-                        if (firstLine) {
-                            remainingData += "\n" + line;
-                            firstLine = false;
-                        } else {
-                            remainingData += "\n" + line;
-                        }
+                    line = readFile.readStringUntil('\n');
+                    if (line.length() > 0) {  // Hanya tambahkan baris yang tidak kosong
+                        remainingData += "\n" + line;
                     }
                 }
                 readFile.close();
@@ -362,35 +360,20 @@ void loop() {
                 if (SD.remove(filename)) {
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
-                        writeFile.print(remainingData);  // Write clean data
-                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                        writeFile.print(remainingData);  // Tulis data yang tersisa
+                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",  
                                     temperature, humidity, r.V, r.F, timestamp);
                         writeFile.close();
                     }
                 }
             } else {
-                File dataFile = SD.open(filename, FILE_WRITE);  // Changed from FILE_APPEND
+                File dataFile = SD.open(filename, FILE_APPEND);  // Gunakan FILE_APPEND untuk menambah data
                 if (dataFile) {
-                    dataFile.seek(dataFile.size());  // Move to end of file
-                    if (currentLines == -1) {  // If only header exists
-                        dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
-                                    temperature, humidity, r.V, r.F, timestamp);
-                    } else {
-                        dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
-                                    temperature, humidity, r.V, r.F, timestamp);
-                    }
+                    dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                                temperature, humidity, r.V, r.F, timestamp);
                     dataFile.close();
                 }
             }
-        } else {
-            String datakirim = String("1#") + 
-                             String(temperature, 2) + "#" +
-                             String(humidity, 2) + "#" +
-                             String(r.V, 2) + "#" +
-                             String(r.F, 2) + "#" +
-                             String(timestamp);
-            serial.println(datakirim);
-            Serial.println("Data sent directly");
         }
     }
     
