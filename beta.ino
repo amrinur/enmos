@@ -325,9 +325,8 @@ void loop() {
             if (!SD.exists(filename)) {
                 File headerFile = SD.open(filename, FILE_WRITE);
                 if (headerFile) {
-                    headerFile.print("Temperature;Humidity;Voltage;Frequency;Timestamp");  // Changed println to print
+                    headerFile.print("Temperature;Humidity;Voltage;Frequency;Timestamp");
                     headerFile.close();
-                    Serial.println("Created new CSV file with header");
                 }
             }
             
@@ -341,29 +340,44 @@ void loop() {
                 }
                 
                 String header = readFile.readStringUntil('\n');
-                String remainingData = header;  // Removed \n after header
+                header.trim();  // Remove any whitespace from header
+                String remainingData = header;  // Start with clean header
                 readFile.readStringUntil('\n'); // Skip oldest line
                 
+                bool firstLine = true;
                 while (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    remainingData += "\n" + line;  // Add newline before each data line
+                    line.trim();  // Remove any whitespace
+                    if (line.length() > 0) {
+                        if (firstLine) {
+                            remainingData += "\n" + line;
+                            firstLine = false;
+                        } else {
+                            remainingData += "\n" + line;
+                        }
+                    }
                 }
                 readFile.close();
                 
                 if (SD.remove(filename)) {
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
-                        writeFile.print(remainingData);  // Print remaining data
-                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",  // Add newline before new data
+                        writeFile.print(remainingData);  // Write clean data
+                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
                                     temperature, humidity, r.V, r.F, timestamp);
                         writeFile.close();
                     }
                 }
             } else {
-                File dataFile = SD.open(filename, FILE_WRITE);
+                File dataFile = SD.open(filename, FILE_APPEND);
                 if (dataFile) {
-                    dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",  // Add newline before new data
-                                temperature, humidity, r.V, r.F, timestamp);
+                    if (currentLines == -1) {  // If only header exists
+                        dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                                    temperature, humidity, r.V, r.F, timestamp);
+                    } else {
+                        dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                                    temperature, humidity, r.V, r.F, timestamp);
+                    }
                     dataFile.close();
                 }
             }
