@@ -363,8 +363,10 @@ void loop() {
                     }
                 }
             } else {
-                File dataFile = SD.open(filename, FILE_APPEND);
+                File dataFile = SD.open(filename, FILE_WRITE);  // Changed from FILE_APPEND
                 if (dataFile) {
+                    // Seek to end of file to append data
+                    dataFile.seek(dataFile.size());
                     dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
                                 temperature, humidity, r.V, r.F, timestamp);
                     dataFile.close();
