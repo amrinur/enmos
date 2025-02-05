@@ -40,7 +40,7 @@ const long DISPLAY_INTERVAL = 180000; // 3 minutes backlight timer
 bool screenOn = true;
 
 // FIFO constants
-const int MAX_DATA_ROWS = 1000;
+const int MAX_DATA_ROWS = 100;
 
 typedef struct {
     float V;
@@ -325,8 +325,7 @@ void loop() {
             if (!SD.exists(filename)) {
                 File headerFile = SD.open(filename, FILE_WRITE);
                 if (headerFile) {
-                    // Write header without newline at end
-                    headerFile.print("Temperature;Humidity;Voltage;Frequency;Timestamp");
+                    headerFile.print("Temperature;Humidity;Voltage;Frequency;Timestamp");  // Changed println to print
                     headerFile.close();
                     Serial.println("Created new CSV file with header");
                 }
@@ -342,28 +341,20 @@ void loop() {
                 }
                 
                 String header = readFile.readStringUntil('\n');
-                String remainingData = header;  // Store header without newline
+                String remainingData = header;  // Removed \n after header
                 readFile.readStringUntil('\n'); // Skip oldest line
-                
-                // First data line should be added with newline before it
-                String firstLine = readFile.readStringUntil('\n');
-                if (firstLine.length() > 0) {
-                    remainingData += "\n" + firstLine;
-                }
                 
                 while (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    if (line.length() > 0) {
-                        remainingData += "\n" + line;
-                    }
+                    remainingData += "\n" + line;  // Add newline before each data line
                 }
                 readFile.close();
                 
                 if (SD.remove(filename)) {
                     File writeFile = SD.open(filename, FILE_WRITE);
                     if (writeFile) {
-                        writeFile.print(remainingData);  // Write accumulated data
-                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
+                        writeFile.print(remainingData);  // Print remaining data
+                        writeFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",  // Add newline before new data
                                     temperature, humidity, r.V, r.F, timestamp);
                         writeFile.close();
                     }
@@ -371,18 +362,20 @@ void loop() {
             } else {
                 File dataFile = SD.open(filename, FILE_WRITE);
                 if (dataFile) {
-                    dataFile.seek(dataFile.size());  // Go to end of file
-                    // Add newline before new data only if file size > 0
-                    if (dataFile.size() > 0) {
-                        dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",
-                                    temperature, humidity, r.V, r.F, timestamp);
-                    } else {
-                        dataFile.printf("%.2f;%.2f;%.2f;%.2f;%lu",
-                                    temperature, humidity, r.V, r.F, timestamp);
-                    }
+                    dataFile.printf("\n%.2f;%.2f;%.2f;%.2f;%lu",  // Add newline before new data
+                                temperature, humidity, r.V, r.F, timestamp);
                     dataFile.close();
                 }
             }
+        } else {
+            String datakirim = String("1#") + 
+                             String(temperature, 2) + "#" +
+                             String(humidity, 2) + "#" +
+                             String(r.V, 2) + "#" +
+                             String(r.F, 2) + "#" +
+                             String(timestamp);
+            serial.println(datakirim);
+            Serial.println("Data sent directly");
         }
     }
     
@@ -395,12 +388,14 @@ void loop() {
             File readFile = SD.open(filename);
             if (readFile && readFile.available()) {
                 String header = readFile.readStringUntil('\n');
-                String remainingData = header;  // Remove \n after header
+                String remainingData = "";
+                remainingData += header;
+                remainingData += "\n";
                 bool dataSent = false;
                 
                 if (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
-                    line.trim();
+                    line.trim();  // Remove any whitespace/newline
                     
                     if (line.length() > 0) {
                         Serial.println("Processing line: " + line);
@@ -442,7 +437,8 @@ void loop() {
                 while (readFile.available()) {
                     String line = readFile.readStringUntil('\n');
                     if (line.length() > 0) {
-                        remainingData += "\n" + line;
+                        remainingData += line;
+                        remainingData += "\n";
                     }
                 }
                 readFile.close();
