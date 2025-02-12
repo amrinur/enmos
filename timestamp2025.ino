@@ -70,13 +70,12 @@ bool verifyCSVFormat();
 
 // Tambahkan di bagian konstanta global
 const int NTP_TIMEOUT = 10000;  // 10 detik timeout untuk NTP
-const unsigned long MIN_UNIX_TIME = 1600000000;  // Sept 2020 sebagai minimum valid time
-const unsigned long MAX_UNIX_TIME = 8000000000;  // 2033 sebagai maximum valid time
 const char* NTP_SERVER = "time.google.com";  // Google NTP server sebagai backup
 
-// Tambahkan fungsi validasi timestamp
+// Sederhanakan fungsi validasi
 bool isValidUnixTimestamp(unsigned long timestamp) {
-    return (timestamp >= MIN_UNIX_TIME && timestamp <= MAX_UNIX_TIME);
+    String timestampStr = String(timestamp);
+    return (timestampStr.length() >= 10);  // Hanya cek minimal 10 digit
 }
 
 // Function to verify CSV format and content
@@ -149,21 +148,24 @@ unsigned long getStoredTimestamp() {
         
         // Coba dapatkan waktu dari Google NTP
         unsigned long startAttempt = millis();
+        bool ntpSuccess = false;
+        
         while (millis() - startAttempt < NTP_TIMEOUT) {
             if (timeClient.update()) {
                 storedTime = timeClient.getEpochTime();
                 if (isValidUnixTimestamp(storedTime)) {
                     saveTimestamp(storedTime);
+                    ntpSuccess = true;
+                    Serial.println("Successfully got time from Google NTP");
                     break;
                 }
             }
             delay(100);
         }
         
-        // Jika masih invalid, gunakan waktu minimum
-        if (!isValidUnixTimestamp(storedTime)) {
-            storedTime = MIN_UNIX_TIME;
-            saveTimestamp(storedTime);
+        if (!ntpSuccess) {
+            Serial.println("ERROR: Failed to get valid timestamp from any source");
+            storedTime = 0; // Indikasi error
         }
     }
     
@@ -313,12 +315,38 @@ unsigned long getNextTimestamp() {
             }
             delay(100);
         }
+        
+        // Jika gagal dengan pool.ntp.org, coba Google NTP
+        timeClient.setPoolServerName(NTP_SERVER);
+        startAttempt = millis();
+        while (millis() - startAttempt < 2000) {
+            if (timeClient.update()) {
+                unsigned long ntpTime = timeClient.getEpochTime();
+                if (isValidUnixTimestamp(ntpTime)) {
+                    lastTimestamp = ntpTime;
+                    saveTimestamp(lastTimestamp);
+                    return lastTimestamp;
+                }
+            }
+            delay(100);
+        }
     }
     
-    // Fallback ke increment jika NTP gagal
+    // Validasi timestamp sebelum increment
+    if (!isValidUnixTimestamp(lastTimestamp)) {
+        Serial.println("ERROR: Invalid timestamp detected");
+        return 0; // Indikasi error
+    }
+    
+    // Increment hanya jika timestamp valid
     lastTimestamp += TIMESTAMP_INCREMENT;
-    saveTimestamp(lastTimestamp);
-    return lastTimestamp;
+    if (isValidUnixTimestamp(lastTimestamp)) {
+        saveTimestamp(lastTimestamp);
+        return lastTimestamp;
+    }
+    
+    Serial.println("ERROR: Timestamp increment resulted in invalid time");
+    return 0; // Indikasi error
 }
 
 void loop() {
