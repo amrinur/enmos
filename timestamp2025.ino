@@ -386,13 +386,14 @@ void loop() {
     }
     
     // Continue existing transmission
+    // Di dalam loop(), bagian pengiriman backup:
     if (isTransmittingBackup && backupFile) {
         if (backupFile.available()) {
             String line = backupFile.readStringUntil('\n');
             line.trim();
             
             if (line.length() > 0) {
-                // Parse and send data
+                // Parse dan kirim data
                 int pos1 = line.indexOf(';');
                 int pos2 = line.indexOf(';', pos1 + 1);
                 int pos3 = line.indexOf(';', pos2 + 1);
@@ -400,53 +401,38 @@ void loop() {
                 
                 if (pos1 > 0 && pos2 > pos1 && pos3 > pos2 && pos4 > pos3) {
                     String datakirim = String("1#") + 
-                                     line.substring(0, pos1) + "#" + 
-                                     line.substring(pos1 + 1, pos2) + "#" + 
-                                     line.substring(pos2 + 1, pos3) + "#" + 
-                                     line.substring(pos3 + 1, pos4) + "#" + 
-                                     line.substring(pos4 + 1);
+                                    line.substring(0, pos1) + "#" + 
+                                    line.substring(pos1 + 1, pos2) + "#" + 
+                                    line.substring(pos2 + 1, pos3) + "#" + 
+                                    line.substring(pos3 + 1, pos4) + "#" + 
+                                    line.substring(pos4 + 1);
                     
                     serial.println(datakirim);
                     Serial.println("Sent backup: " + datakirim);
+                    linesSent++;
                     
-                    // After sending, remove this line from file
-                    String tempData = "";
-                    
-                    // Read remaining lines
-                    while (backupFile.available()) {
-                        String remainingLine = backupFile.readStringUntil('\n');
-                        if (remainingLine.length() > 0) {
-                            tempData += remainingLine + "\n";
-                        }
-                    }
-                    
-                    // Close and rewrite file with header and remaining data
-                    backupFile.close();
-                    SD.remove(filename);
-                    File writeFile = SD.open(filename, FILE_WRITE);
-                    if (writeFile) {
-                        writeFile.print(backupHeader);  // Write header without newline
-                        if (tempData.length() > 0) {
-                            writeFile.print("\n" + tempData);  // Add newline before remaining data
-                        }
-                        writeFile.close();
-                        Serial.println("Removed sent line from file");
-                    }
-                    
-                    // Reopen file for next transmission
-                    backupFile = SD.open(filename);
-                    if (backupFile) {
-                        backupHeader = backupFile.readStringUntil('\n');
-                    } else {
-                        isTransmittingBackup = false;
-                    }
+                    // Tidak perlu menyimpan data yang sudah dikirim
+                    // Hapus baris: tempData += line + "\n";
                 }
                 delay(TRANSMISSION_DELAY);
             }
         } else {
+            // End of file reached
             backupFile.close();
+            
+            // Reset file hanya dengan header
+            SD.remove(filename);
+            File writeFile = SD.open(filename, FILE_WRITE);
+            if (writeFile) {
+                writeFile.println(backupHeader);  // Tulis header dengan newline
+                writeFile.close();
+                Serial.printf("Backup transmission complete. Sent %d lines. File cleared.\n", linesSent);
+            }
+            
+            // Reset transmission state
             isTransmittingBackup = false;
-            Serial.println("Backup transmission complete");
+            linesSent = 0;
+            // Hapus baris: tempData = "";
         }
     }
   }
