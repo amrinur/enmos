@@ -325,7 +325,7 @@ void loop() {
                     return;
                 }
                 
-                // Read header
+                // Read header and handle FIFO data
                 String header = readFile.readStringUntil('\n');
                 String remainingData = header;  // Header without newline
                 readFile.readStringUntil('\n'); // Skip oldest data
@@ -423,8 +423,9 @@ void loop() {
             File writeFile = SD.open(filename, FILE_WRITE);
             if (writeFile) {
                 writeFile.print(backupHeader);  // Write header without newline
-                // If needed, you could write back unconfirmed data here:
-                // writeFile.printf("\n%s", tempData.c_str());
+                if (tempData.length() > 0) {  // Only write data if exists
+                    writeFile.print("\n" + tempData);  // Add newline before data
+                }
                 writeFile.close();
                 verifyCSVFormat();
                 Serial.printf("Backup transmission complete. Sent %d lines\n", linesSent);
