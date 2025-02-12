@@ -28,7 +28,7 @@ unsigned long previousWiFiCheck = 0;
 const long WIFI_CHECK_INTERVAL = 14000;
 
 // File and timing
-char filename[25] = "/epul.csv";
+char filename[25] = "/IPOOL.csv";
 unsigned long previousMillis = 0;
 unsigned long previousMillisSensor = 0;
 unsigned long lastTimestamp = 0;
@@ -67,16 +67,6 @@ int countDataLines();
 void updateDisplay(float temperature, float humidity, float voltage, float frequency, bool modbusOK, bool wifiOK, bool sensorOK);
 void setupDisplay();
 bool verifyCSVFormat();
-
-// Tambahkan di bagian konstanta global
-const int NTP_TIMEOUT = 10000;  // 10 detik timeout untuk NTP
-const char* NTP_SERVER = "time.google.com";  // Google NTP server sebagai backup
-
-// Sederhanakan fungsi validasi
-bool isValidUnixTimestamp(unsigned long timestamp) {
-    String timestampStr = String(timestamp);
-    return (timestampStr.length() >= 10);  // Hanya cek minimal 10 digit
-}
 
 // Function to verify CSV format and content
 bool verifyCSVFormat() {
@@ -123,9 +113,9 @@ void writeToCSV(float temperature, float humidity, float voltage, float frequenc
     }
 }
 
-// Modifikasi fungsi getStoredTimestamp
+// Function to read timestamp reference
 unsigned long getStoredTimestamp() {
-    unsigned long storedTime = 0;
+    unsigned long lastTimestamp = 0;
     
     if (SD.exists(timeRefFile)) {
         File file = SD.open(timeRefFile);
@@ -134,44 +124,16 @@ unsigned long getStoredTimestamp() {
                 String timestamp = file.readStringUntil('\n');
                 timestamp.trim();
                 if (timestamp.length() > 0) {
-                    storedTime = timestamp.toInt();
+                    lastTimestamp = timestamp.toInt();
                 }
             }
             file.close();
         }
     }
     
-    // Validasi timestamp yang tersimpan
-    if (!isValidUnixTimestamp(storedTime)) {
-        Serial.println("Invalid stored timestamp, trying Google NTP");
-        timeClient.setPoolServerName(NTP_SERVER);
-        
-        // Coba dapatkan waktu dari Google NTP
-        unsigned long startAttempt = millis();
-        bool ntpSuccess = false;
-        
-        while (millis() - startAttempt < NTP_TIMEOUT) {
-            if (timeClient.update()) {
-                storedTime = timeClient.getEpochTime();
-                if (isValidUnixTimestamp(storedTime)) {
-                    saveTimestamp(storedTime);
-                    ntpSuccess = true;
-                    Serial.println("Successfully got time from Google NTP");
-                    break;
-                }
-            }
-            delay(100);
-        }
-        
-        if (!ntpSuccess) {
-            Serial.println("ERROR: Failed to get valid timestamp from any source");
-            storedTime = 0; // Indikasi error
-        }
-    }
-    
     Serial.print("Last stored timestamp: ");
-    Serial.println(storedTime);
-    return storedTime;
+    Serial.println(lastTimestamp);
+    return lastTimestamp;
 }
 
 // Function to save timestamp reference
@@ -185,7 +147,25 @@ void saveTimestamp(unsigned long timestamp) {
     }
 }
 
-// Modifikasi setup untuk menambah inisialisasi NTP yang lebih baik
+unsigned long getNextTimestamp() {
+    // Baca timestamp terakhir dari file
+    lastTimestamp = getStoredTimestamp();
+    
+    // Selalu tambah 10 detik dari timestamp terakhir
+    lastTimestamp += TIMESTAMP_INCREMENT;
+    
+    // Jika online dan bisa update NTP, bandingkan dan gunakan yang lebih besar
+    if (wifiConnected && timeClient.update()) {
+        unsigned long ntpTime = timeClient.getEpochTime();
+        // Gunakan nilai yang lebih besar antara NTP dan lastTimestamp+10
+        lastTimestamp = max(ntpTime, lastTimestamp);
+    }
+    
+    // Simpan timestamp terbaru ke file
+    saveTimestamp(lastTimestamp);
+    return lastTimestamp;
+}
+
 void setup() {
     // Initialize Serial communications
     Serial.begin(115200);
@@ -221,48 +201,18 @@ void setup() {
         wifiConnected = true;
         Serial.println("WiFi Connected!");
         
-        // Initialize NTP dengan timeout
+        // Initialize NTP
         timeClient.begin();
-        unsigned long startAttempt = millis();
-        bool ntpInitialized = false;
-        
-        while (millis() - startAttempt < NTP_TIMEOUT) {
-            if (timeClient.update()) {
-                lastTimestamp = timeClient.getEpochTime();
-                if (isValidUnixTimestamp(lastTimestamp)) {
-                    ntpInitialized = true;
-                    saveTimestamp(lastTimestamp);
-                    Serial.println("NTP initialized successfully");
-                    break;
-                }
-            }
-            delay(100);
-        }
-        
-        if (!ntpInitialized) {
-            Serial.println("NTP init failed, trying Google NTP");
-            timeClient.setPoolServerName(NTP_SERVER);
-            startAttempt = millis();
-            
-            while (millis() - startAttempt < NTP_TIMEOUT) {
-                if (timeClient.update()) {
-                    lastTimestamp = timeClient.getEpochTime();
-                    if (isValidUnixTimestamp(lastTimestamp)) {
-                        saveTimestamp(lastTimestamp);
-                        Serial.println("Google NTP initialized successfully");
-                        break;
-                    }
-                }
-                delay(100);
-            }
-        }
-        
-        if (!isValidUnixTimestamp(lastTimestamp)) {
-            lastTimestamp = getStoredTimestamp();
-        }
-        
+        if (timeClient.update()) {
+    lastTimestamp = timeClient.getEpochTime();
+    saveTimestamp(lastTimestamp);
+      } else {
+    lastTimestamp = getStoredTimestamp();
+      }
+        Serial.print("Base time: ");
+        Serial.println(baseTime);
     } else {
-        lastTimestamp = getStoredTimestamp();
+        baseTime = getStoredTimestamp();
     }
     
     // Initialize Display
@@ -297,56 +247,6 @@ void setup() {
     }
     delay(2000);
     tft.fillScreen(TFT_BLACK);
-}
-
-// Modifikasi getNextTimestamp untuk validasi
-unsigned long getNextTimestamp() {
-    if (wifiConnected) {
-        // Coba update NTP dengan timeout
-        unsigned long startAttempt = millis();
-        while (millis() - startAttempt < 2000) { // 2 detik timeout untuk update reguler
-            if (timeClient.update()) {
-                unsigned long ntpTime = timeClient.getEpochTime();
-                if (isValidUnixTimestamp(ntpTime)) {
-                    lastTimestamp = ntpTime;
-                    saveTimestamp(lastTimestamp);
-                    return lastTimestamp;
-                }
-            }
-            delay(100);
-        }
-        
-        // Jika gagal dengan pool.ntp.org, coba Google NTP
-        timeClient.setPoolServerName(NTP_SERVER);
-        startAttempt = millis();
-        while (millis() - startAttempt < 2000) {
-            if (timeClient.update()) {
-                unsigned long ntpTime = timeClient.getEpochTime();
-                if (isValidUnixTimestamp(ntpTime)) {
-                    lastTimestamp = ntpTime;
-                    saveTimestamp(lastTimestamp);
-                    return lastTimestamp;
-                }
-            }
-            delay(100);
-        }
-    }
-    
-    // Validasi timestamp sebelum increment
-    if (!isValidUnixTimestamp(lastTimestamp)) {
-        Serial.println("ERROR: Invalid timestamp detected");
-        return 0; // Indikasi error
-    }
-    
-    // Increment hanya jika timestamp valid
-    lastTimestamp += TIMESTAMP_INCREMENT;
-    if (isValidUnixTimestamp(lastTimestamp)) {
-        saveTimestamp(lastTimestamp);
-        return lastTimestamp;
-    }
-    
-    Serial.println("ERROR: Timestamp increment resulted in invalid time");
-    return 0; // Indikasi error
 }
 
 void loop() {
@@ -487,10 +387,6 @@ void loop() {
     
     // Continue existing transmission
     if (isTransmittingBackup && backupFile) {
-        static int linesSent = 0;
-        static String tempData = "";
-        
-        // Process one line at a time
         if (backupFile.available()) {
             String line = backupFile.readStringUntil('\n');
             line.trim();
@@ -512,34 +408,45 @@ void loop() {
                     
                     serial.println(datakirim);
                     Serial.println("Sent backup: " + datakirim);
-                    linesSent++;
                     
-                    // Store the line in case we need to preserve it
-                    tempData += line + "\n";
+                    // After sending, remove this line from file
+                    String tempData = "";
+                    
+                    // Read remaining lines
+                    while (backupFile.available()) {
+                        String remainingLine = backupFile.readStringUntil('\n');
+                        if (remainingLine.length() > 0) {
+                            tempData += remainingLine + "\n";
+                        }
+                    }
+                    
+                    // Close and rewrite file with header and remaining data
+                    backupFile.close();
+                    SD.remove(filename);
+                    File writeFile = SD.open(filename, FILE_WRITE);
+                    if (writeFile) {
+                        writeFile.print(backupHeader);  // Write header without newline
+                        if (tempData.length() > 0) {
+                            writeFile.print("\n" + tempData);  // Add newline before remaining data
+                        }
+                        writeFile.close();
+                        Serial.println("Removed sent line from file");
+                    }
+                    
+                    // Reopen file for next transmission
+                    backupFile = SD.open(filename);
+                    if (backupFile) {
+                        backupHeader = backupFile.readStringUntil('\n');
+                    } else {
+                        isTransmittingBackup = false;
+                    }
                 }
-                delay(TRANSMISSION_DELAY); // Add delay between transmissions
+                delay(TRANSMISSION_DELAY);
             }
         } else {
-            // End of file reached
             backupFile.close();
-            
-            // Reset file with header and any unconfirmed data
-            SD.remove(filename);
-            File writeFile = SD.open(filename, FILE_WRITE);
-            if (writeFile) {
-                writeFile.print(backupHeader);  // Write header without newline
-                if (tempData.length() > 0) {  // Only write data if exists
-                    writeFile.print("\n" + tempData);  // Add newline before data
-                }
-                writeFile.close();
-                verifyCSVFormat();
-                Serial.printf("Backup transmission complete. Sent %d lines\n", linesSent);
-            }
-            
-            // Reset transmission state
             isTransmittingBackup = false;
-            linesSent = 0;
-            tempData = "";
+            Serial.println("Backup transmission complete");
         }
     }
   }
